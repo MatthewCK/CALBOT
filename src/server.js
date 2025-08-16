@@ -68,7 +68,10 @@ whatsappClient.on('ready', () => {
   try {
     console.log('WhatsApp client is ready!');
     whatsappReady = true;
-    checkAndSendInitialConfirmation();
+    // Add a small delay to prevent race conditions
+    setTimeout(() => {
+      checkAndSendInitialConfirmation();
+    }, 1000);
   } catch (error) {
     console.error('Error in WhatsApp ready handler:', error.message);
   }
@@ -81,7 +84,10 @@ whatsappClient.on('auth_failure', (msg) => {
 // WhatsApp will be initialized after server starts
 
 async function checkAndSendInitialConfirmation() {
-  if (initialConfirmationSent) return;
+  if (initialConfirmationSent) {
+    console.log('Initial confirmation already sent, skipping...');
+    return;
+  }
   
   try {
     // Test MLB API by fetching Cal's stats
@@ -94,9 +100,14 @@ async function checkAndSendInitialConfirmation() {
       await sendWhatsApp(message);
       initialConfirmationSent = true;
       console.log('Initial confirmation message sent!');
+    } else {
+      console.log('Not ready for initial confirmation yet:', {
+        whatsappReady,
+        hasCalStats: !!calStats
+      });
     }
   } catch (error) {
-    console.log('MLB API not ready yet, will retry on next poll cycle');
+    console.log('MLB API not ready yet, will retry on next poll cycle:', error.message);
   }
 }
 
