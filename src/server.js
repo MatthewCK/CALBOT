@@ -9,6 +9,17 @@ const QRCode = require('qrcode');
 const PORT = process.env.PORT || 3000;
 const RECIPIENT_NUMBERS = (process.env.RECIPIENT_NUMBERS || '').split(',').map(s => s.trim()).filter(Boolean);
 
+// Log configuration on startup
+console.log('=== CAL DINGER BOT STARTUP ===');
+console.log('Port:', PORT);
+console.log('Recipient Numbers:', RECIPIENT_NUMBERS);
+console.log('Number of recipients:', RECIPIENT_NUMBERS.length);
+console.log('Cal Raleigh Player ID:', CAL_RALEIGH_PLAYER_ID);
+console.log('Mariners Team ID:', MARINERS_TEAM_ID);
+console.log('Current Season:', CURRENT_SEASON);
+console.log('Poll Interval (ms):', POLL_INTERVAL_MS);
+console.log('================================');
+
 // Real MLB IDs
 const CAL_RALEIGH_PLAYER_ID = process.env.CAL_RALEIGH_PLAYER_ID || '668939';
 const MARINERS_TEAM_ID = process.env.MARINERS_TEAM_ID || '136';
@@ -292,7 +303,14 @@ function startPolling() {
 // Minimal server for Railway health check and manual trigger
 const app = express();
 app.get('/', (req, res) => {
-  res.json({ ok: true, service: 'cal-dinger-bot', trackingGamePk: currentGamePk || null });
+  res.json({ 
+    ok: true, 
+    service: 'cal-dinger-bot', 
+    trackingGamePk: currentGamePk || null,
+    whatsappReady: whatsappReady,
+    hasQRCode: !!currentQRCode,
+    timestamp: new Date().toISOString()
+  });
 });
 app.post('/test-whatsapp', express.json(), async (req, res) => {
   const msg = req.body?.message || '🚨🚨🚨 TEST DINGER! 🚨🚨🚨 This is a test from Cal Dinger Bot! ⚾💥🏟️';
@@ -385,11 +403,16 @@ app.get('/cal-stats', async (req, res) => {
 });
 
 app.get('/whatsapp-qr', (req, res) => {
+  console.log('WhatsApp QR endpoint accessed');
+  console.log('Current QR code available:', !!currentQRCode);
+  console.log('WhatsApp ready:', whatsappReady);
+  
   if (!currentQRCode) {
     return res.json({
       ok: false,
       message: 'No QR code available. WhatsApp may already be authenticated or not ready yet.',
-      whatsappReady: whatsappReady
+      whatsappReady: whatsappReady,
+      timestamp: new Date().toISOString()
     });
   }
   
@@ -397,7 +420,8 @@ app.get('/whatsapp-qr', (req, res) => {
     ok: true,
     qrCode: currentQRCode,
     whatsappReady: whatsappReady,
-    message: 'Copy this QR code data to any QR code generator to scan with WhatsApp'
+    message: 'Copy this QR code data to any QR code generator to scan with WhatsApp',
+    timestamp: new Date().toISOString()
   });
 });
 
