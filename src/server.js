@@ -40,6 +40,11 @@ const whatsappClient = new Client({
 let whatsappReady = false;
 let initialConfirmationSent = false;
 let currentQRCode = null;
+let gameStartNotificationSent = false;
+let lastCheckedDate = null;
+let currentGameInfo = null;
+let calIsUpToBat = false;
+let nextPollTime = null;
 
 // WhatsApp event handlers
 whatsappClient.on('qr', (qr) => {
@@ -108,6 +113,208 @@ async function checkAndSendInitialConfirmation() {
     }
   } catch (error) {
     console.log('MLB API not ready yet, will retry on next poll cycle:', error.message);
+  }
+}
+
+async function checkAndSendGameStartNotification(gamePk) {
+  if (gameStartNotificationSent) {
+    console.log('Game start notification already sent, skipping...');
+    return;
+  }
+  
+  try {
+    console.log('Checking for game start notification...');
+    
+    // Get game details
+    const scheduleUrl = `https://statsapi.mlb.com/api/v1/schedule?date=${getTodayDateString()}&teamId=${MARINERS_TEAM_ID}&sportId=1`;
+    const scheduleData = await fetchJson(scheduleUrl);
+    
+    let gameInfo = null;
+    if (scheduleData?.dates && scheduleData.dates.length > 0) {
+      const games = scheduleData.dates[0]?.games || [];
+      gameInfo = games.find(game => game.gamePk === gamePk);
+    }
+    
+    if (gameInfo && gameInfo.status?.detailedState === 'In Progress') {
+      // Get Cal's current stats
+      const calStats = await fetchCalSeasonStats();
+      
+      // Format game info
+      const awayTeam = gameInfo.teams?.away?.team?.name || 'Away Team';
+      const homeTeam = gameInfo.teams?.home?.team?.name || 'Home Team';
+      const venue = gameInfo.venue?.name || 'Unknown Venue';
+      const gameTime = new Date(gameInfo.gameDate).toLocaleTimeString('en-US', { 
+        hour: 'numeric', 
+        minute: '2-digit',
+        timeZone: 'America/Los_Angeles'
+      });
+      
+      const message = `⚾🚨 MARINERS GAME STARTED! 🚨⚾\n\n🏟️ ${awayTeam} @ ${homeTeam}\n📍 ${venue}\n🕐 ${gameTime} PT\n\n🏆 Cal's ${CURRENT_SEASON} Stats:\n   • HR: ${calStats.homeRuns}\n   • RBI: ${calStats.rbi}\n   • AVG: ${calStats.avg}\n   • OPS: ${calStats.ops}\n\n🔍 Monitoring for Cal dingers... ⚾💥`;
+      
+      await sendWhatsApp(message);
+      gameStartNotificationSent = true;
+      console.log('Game start notification sent!');
+    } else {
+      console.log('Game not in progress yet:', gameInfo?.status?.detailedState);
+    }
+  } catch (error) {
+    console.error('Error checking for game start notification:', error.message);
+  }
+}
+
+function calculateNextPollTime(gameInfo) {
+  if (!gameInfo) return null;
+  
+  const now = new Date();
+  const gameTime = new Date(gameInfo.gameDate);
+  const thirtyMinutesBeforeGame = new Date(gameTime.getTime() - (30 * 60 * 1000));
+  
+  // If we're more than 30 minutes before game, wait until 30 minutes before
+  if (now < thirtyMinutesBeforeGame) {
+    return thirtyMinutesBeforeGame;
+  }
+  
+  // If game is in progress, poll every 10 seconds
+  if (gameInfo.status?.detailedState === 'In Progress') {
+    return new Date(now.getTime() + (10 * 1000));
+  }
+  
+  // If game hasn't started yet, poll every 5 minutes
+  return new Date(now.getTime() + (5 * 60 * 1000));
+}
+
+function shouldPollNow() {
+  if (!nextPollTime) return true;
+  return new Date() >= nextPollTime;
+}
+
+function updatePollInterval() {
+  if (calIsUpToBat) {
+    // Cal is up to bat - poll every second
+    nextPollTime = new Date(Date.now() + 1000);
+    console.log('Cal is up to bat - switching to 1-second polling');
+  } else if (currentGameInfo && currentGameInfo.status?.detailedState === 'In Progress') {
+    // Game in progress - poll every 10 seconds
+    nextPollTime = new Date(Date.now() + (10 * 1000));
+    console.log('Game in progress - polling every 10 seconds');
+  } else if (currentGameInfo) {
+    // Game scheduled - use calculated time
+    nextPollTime = calculateNextPollTime(currentGameInfo);
+    if (nextPollTime) {
+      const timeUntilNextPoll = Math.round((nextPollTime - new Date()) / 1000 / 60);
+      console.log(`Next poll in ${timeUntilNextPoll} minutes`);
+    }
+  }
+}
+
+async function checkIfCalIsUpToBat(gamePk) {
+  try {
+    const feed = await fetchLiveFeed(gamePk);
+    const liveData = feed?.liveData;
+    
+    if (!liveData) return false;
+    
+    // Check if Cal is the current batter
+    const currentBatter = liveData?.plays?.currentPlay?.matchup?.batter;
+    if (currentBatter && String(currentBatter.id) === String(CAL_RALEIGH_PLAYER_ID)) {
+      if (!calIsUpToBat) {
+        console.log('🚨 CAL IS UP TO BAT! 🚨');
+        calIsUpToBat = true;
+        updatePollInterval();
+        
+        // Send notification that Cal is up to bat
+        const message = `⚾🚨 CAL IS UP TO BAT! 🚨⚾\n\n🏟️ ${getGameInfoString()}\n\n🔍 Monitoring for dinger... ⚾💥`;
+        await sendWhatsApp(message);
+      }
+      return true;
+    }
+    
+    // Check if Cal just finished his at-bat
+    if (calIsUpToBat) {
+      console.log('Cal finished his at-bat, switching back to 10-second polling');
+      calIsUpToBat = false;
+      updatePollInterval();
+      
+      // Send notification with at-bat result
+      await sendCalAtBatResult(gamePk);
+    }
+    
+    return false;
+  } catch (error) {
+    console.error('Error checking if Cal is up to bat:', error.message);
+    return false;
+  }
+}
+
+function getGameInfoString() {
+  if (!currentGameInfo) return 'Mariners Game';
+  
+  const awayTeam = currentGameInfo.teams?.away?.team?.name || 'Away Team';
+  const homeTeam = currentGameInfo.teams?.home?.team?.name || 'Home Team';
+  const inning = currentGameInfo.linescore?.currentInning || 'Unknown';
+  const inningHalf = currentGameInfo.linescore?.inningState || '';
+  
+  return `${awayTeam} @ ${homeTeam} - ${inningHalf} ${inning}`;
+}
+
+async function sendCalAtBatResult(gamePk) {
+  try {
+    const feed = await fetchLiveFeed(gamePk);
+    const allPlays = feed?.liveData?.plays?.allPlays || [];
+    
+    // Find Cal's most recent at-bat
+    const calPlays = allPlays.filter(play => {
+      const batterId = String(play?.matchup?.batter?.id || '');
+      return batterId === String(CAL_RALEIGH_PLAYER_ID);
+    });
+    
+    if (calPlays.length === 0) return;
+    
+    const lastCalPlay = calPlays[calPlays.length - 1];
+    const result = lastCalPlay?.result;
+    const about = lastCalPlay?.about;
+    
+    if (!result) return;
+    
+    // Check if this is a home run - if so, skip the at-bat result since we already sent the dinger message
+    const eventType = result.eventType || '';
+    if (eventType === 'home_run') {
+      console.log('Skipping at-bat result for home run - dinger message already sent');
+      return;
+    }
+    
+    // Format the at-bat result
+    const description = result.description || 'Unknown result';
+    const rbi = result.rbi || 0;
+    const runs = result.runs || 0;
+    
+    let resultEmoji = '⚾';
+    let resultType = 'At-Bat';
+    
+    if (eventType === 'single' || eventType === 'double' || eventType === 'triple') {
+      resultEmoji = '🏃‍♂️';
+      resultType = 'Hit';
+    } else if (eventType === 'walk') {
+      resultEmoji = '🚶‍♂️';
+      resultType = 'Walk';
+    } else if (eventType === 'strikeout') {
+      resultEmoji = '❌';
+      resultType = 'Strikeout';
+    } else if (eventType === 'out') {
+      resultEmoji = '🔄';
+      resultType = 'Out';
+    }
+    
+    const inningHalf = about?.isTopInning ? 'Top' : 'Bottom';
+    const inning = about?.inning || 'Unknown';
+    
+    const message = `${resultEmoji} CAL'S AT-BAT RESULT: ${resultType} ${resultEmoji}\n\n🏟️ ${getGameInfoString()}\n📝 ${description}\n${rbi > 0 ? `🏃‍♂️ ${rbi} RBI\n` : ''}${runs > 0 ? `🏃‍♂️ ${runs} Run(s)\n` : ''}⚾ Inning: ${inningHalf} ${inning}`;
+    
+    await sendWhatsApp(message);
+    console.log('Cal at-bat result notification sent:', description);
+    
+  } catch (error) {
+    console.error('Error sending Cal at-bat result:', error.message);
   }
 }
 
@@ -270,6 +477,7 @@ async function checkForCalDingers(gamePk) {
       const eventId = play?.playEvents?.[0]?.details?.eventId || play?.playGuid || `${play?.about?.atBatIndex}`;
       if (eventId && notifiedEventIds.has(eventId)) continue;
 
+      // Send the special dinger message for home runs
       const seasonStats = await fetchCalSeasonStats();
       console.log('Cal\'s current season stats:', seasonStats);
       const msg = formatHrMessage(play, seasonStats);
@@ -287,33 +495,78 @@ let pollTimer = null;
 
 async function pollLoop() {
   try {
+    // Check if we should poll now
+    if (!shouldPollNow()) {
+      return;
+    }
+    
     // Check for initial confirmation if not sent yet
     if (!initialConfirmationSent && whatsappReady) {
       await checkAndSendInitialConfirmation();
     }
+    
+    // Reset flags if it's a new day
+    const today = getTodayDateString();
+    if (lastCheckedDate && lastCheckedDate !== today) {
+      console.log('New day detected, resetting notification flags');
+      gameStartNotificationSent = false;
+      currentGamePk = null;
+      currentGameInfo = null;
+      calIsUpToBat = false;
+      nextPollTime = null;
+    }
+    lastCheckedDate = today;
     
     if (!currentGamePk) {
       console.log('No current gamePk, searching for today\'s Mariners game...');
       currentGamePk = await findTodayMarinersGamePk();
       if (!currentGamePk) {
         console.log('No Mariners game found today; will retry in next poll cycle');
+        // Wait 30 minutes before checking again
+        nextPollTime = new Date(Date.now() + (30 * 60 * 1000));
         return;
       }
       console.log('Found and now tracking gamePk:', currentGamePk);
+      
+      // Get game info for polling calculations
+      const scheduleUrl = `https://statsapi.mlb.com/api/v1/schedule?date=${getTodayDateString()}&teamId=${MARINERS_TEAM_ID}&sportId=1`;
+      const scheduleData = await fetchJson(scheduleUrl);
+      if (scheduleData?.dates && scheduleData.dates.length > 0) {
+        const games = scheduleData.dates[0]?.games || [];
+        currentGameInfo = games.find(game => game.gamePk === currentGamePk);
+        updatePollInterval();
+      }
+    }
+    
+    // Check for game start notification
+    if (currentGamePk && !gameStartNotificationSent) {
+      await checkAndSendGameStartNotification(currentGamePk);
+    }
+    
+    // Check if Cal is up to bat (only during games)
+    if (currentGamePk && currentGameInfo?.status?.detailedState === 'In Progress') {
+      await checkIfCalIsUpToBat(currentGamePk);
     }
     
     console.log('Polling for Cal dingers in gamePk:', currentGamePk);
     await checkForCalDingers(currentGamePk);
+    
+    // Update polling interval for next cycle
+    updatePollInterval();
+    
   } catch (err) {
     console.error('Poll loop error:', err?.message || err);
     // Reset currentGamePk on error to retry finding a game
     currentGamePk = null;
+    currentGameInfo = null;
+    calIsUpToBat = false;
   }
 }
 
 function startPolling() {
   if (pollTimer) return;
-  pollTimer = setInterval(pollLoop, POLL_INTERVAL_MS);
+  // Use a shorter base interval (5 seconds) for more responsive polling
+  pollTimer = setInterval(pollLoop, 5000);
   // Kick off immediately
   pollLoop();
 }
