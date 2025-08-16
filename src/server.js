@@ -696,6 +696,55 @@ app.get('/whatsapp-qr', (req, res) => {
   });
 });
 
+app.post('/health-status', express.json(), async (req, res) => {
+  try {
+    console.log('Health status endpoint accessed');
+    
+    // Get current status information
+    const now = new Date();
+    const calStats = await fetchCalSeasonStats();
+    
+    // Build health status message
+    const statusMessage = `🏥 CAL DINGER BOT HEALTH STATUS 🏥\n\n` +
+      `⏰ Time: ${now.toLocaleString('en-US', { timeZone: 'America/Los_Angeles' })} PT\n` +
+      `📱 WhatsApp: ${whatsappReady ? '✅ Connected' : '❌ Disconnected'}\n` +
+      `🎮 Game Tracking: ${currentGamePk ? `✅ Game ${currentGamePk}` : '❌ No game'}\n` +
+      `🏟️ Game Status: ${currentGameInfo?.status?.detailedState || 'Unknown'}\n` +
+      `⚾ Cal Up to Bat: ${calIsUpToBat ? '🚨 YES!' : 'No'}\n\n` +
+      `🏆 Cal's ${CURRENT_SEASON} Stats:\n` +
+      `   • HR: ${calStats.homeRuns}\n` +
+      `   • RBI: ${calStats.rbi}\n` +
+      `   • AVG: ${calStats.avg}\n` +
+      `   • OPS: ${calStats.ops}\n\n` +
+      `🔧 Bot Status: ✅ Healthy and Monitoring\n` +
+      `📊 Recipients: ${RECIPIENT_NUMBERS.length} number(s) configured`;
+    
+    // Send the health status message
+    await sendWhatsApp(statusMessage);
+    
+    res.json({
+      ok: true,
+      message: 'Health status sent to WhatsApp recipients',
+      timestamp: now.toISOString(),
+      status: {
+        whatsappReady,
+        currentGamePk,
+        gameStatus: currentGameInfo?.status?.detailedState,
+        calIsUpToBat,
+        recipientCount: RECIPIENT_NUMBERS.length
+      }
+    });
+    
+  } catch (error) {
+    console.error('Error sending health status:', error.message);
+    res.status(500).json({
+      ok: false,
+      error: error.message,
+      timestamp: new Date().toISOString()
+    });
+  }
+});
+
 // Start the server immediately, then initialize WhatsApp
 app.listen(PORT, () => {
   console.log(`Server listening on :${PORT}`);
