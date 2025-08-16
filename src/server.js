@@ -3,6 +3,7 @@ require('dotenv').config();
 const express = require('express');
 const { Client, LocalAuth } = require('whatsapp-web.js');
 const qrcode = require('qrcode-terminal');
+const QRCode = require('qrcode');
 
 // --- Config (env) ---
 const PORT = process.env.PORT || 3000;
@@ -27,11 +28,25 @@ const whatsappClient = new Client({
 
 let whatsappReady = false;
 let initialConfirmationSent = false;
+let currentQRCode = null;
 
 // WhatsApp event handlers
 whatsappClient.on('qr', (qr) => {
-  console.log('Scan this QR code to login to WhatsApp:');
-  qrcode.generate(qr, { small: true });
+  currentQRCode = qr;
+  console.log('=== WHATSAPP QR CODE ===');
+  console.log('QR Code Data (copy this to a QR code generator if needed):');
+  console.log(qr);
+  console.log('--- End QR Code Data ---');
+  
+  // Try to generate a more compatible QR code
+  try {
+    console.log('Alternative QR Code (if terminal supports it):');
+    qrcode.generate(qr, { small: true });
+  } catch (error) {
+    console.log('Terminal QR code generation failed, using data only');
+  }
+  
+  console.log('=== END WHATSAPP QR CODE ===');
 });
 
 whatsappClient.on('ready', () => {
@@ -367,6 +382,23 @@ app.get('/cal-stats', async (req, res) => {
       error: e?.message || String(e)
     });
   }
+});
+
+app.get('/whatsapp-qr', (req, res) => {
+  if (!currentQRCode) {
+    return res.json({
+      ok: false,
+      message: 'No QR code available. WhatsApp may already be authenticated or not ready yet.',
+      whatsappReady: whatsappReady
+    });
+  }
+  
+  res.json({
+    ok: true,
+    qrCode: currentQRCode,
+    whatsappReady: whatsappReady,
+    message: 'Copy this QR code data to any QR code generator to scan with WhatsApp'
+  });
 });
 
 app.listen(PORT, () => {
