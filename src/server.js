@@ -9,6 +9,14 @@ const QRCode = require('qrcode');
 const PORT = process.env.PORT || 3000;
 const RECIPIENT_NUMBERS = (process.env.RECIPIENT_NUMBERS || '').split(',').map(s => s.trim()).filter(Boolean);
 
+// Real MLB IDs
+const CAL_RALEIGH_PLAYER_ID = process.env.CAL_RALEIGH_PLAYER_ID || '663728';
+const MARINERS_TEAM_ID = process.env.MARINERS_TEAM_ID || '136';
+const CURRENT_SEASON = new Date().getFullYear();
+
+// Polling interval in ms
+const POLL_INTERVAL_MS = Number(process.env.POLL_INTERVAL_MS || 15000);
+
 // Log configuration on startup
 console.log('=== CAL DINGER BOT STARTUP ===');
 console.log('Port:', PORT);
@@ -19,14 +27,6 @@ console.log('Mariners Team ID:', MARINERS_TEAM_ID);
 console.log('Current Season:', CURRENT_SEASON);
 console.log('Poll Interval (ms):', POLL_INTERVAL_MS);
 console.log('================================');
-
-// Real MLB IDs
-const CAL_RALEIGH_PLAYER_ID = process.env.CAL_RALEIGH_PLAYER_ID || '668939';
-const MARINERS_TEAM_ID = process.env.MARINERS_TEAM_ID || '136';
-const CURRENT_SEASON = new Date().getFullYear();
-
-// Polling interval in ms
-const POLL_INTERVAL_MS = Number(process.env.POLL_INTERVAL_MS || 15000);
 
 // Initialize WhatsApp client
 const whatsappClient = new Client({
