@@ -43,35 +43,42 @@ let currentQRCode = null;
 
 // WhatsApp event handlers
 whatsappClient.on('qr', (qr) => {
-  currentQRCode = qr;
-  console.log('=== WHATSAPP QR CODE ===');
-  console.log('QR Code Data (copy this to a QR code generator if needed):');
-  console.log(qr);
-  console.log('--- End QR Code Data ---');
-  
-  // Try to generate a more compatible QR code
   try {
-    console.log('Alternative QR Code (if terminal supports it):');
-    qrcode.generate(qr, { small: true });
+    currentQRCode = qr;
+    console.log('=== WHATSAPP QR CODE ===');
+    console.log('QR Code Data (copy this to a QR code generator if needed):');
+    console.log(qr);
+    console.log('--- End QR Code Data ---');
+    
+    // Try to generate a more compatible QR code
+    try {
+      console.log('Alternative QR Code (if terminal supports it):');
+      qrcode.generate(qr, { small: true });
+    } catch (error) {
+      console.log('Terminal QR code generation failed, using data only');
+    }
+    
+    console.log('=== END WHATSAPP QR CODE ===');
   } catch (error) {
-    console.log('Terminal QR code generation failed, using data only');
+    console.error('Error handling QR code:', error.message);
   }
-  
-  console.log('=== END WHATSAPP QR CODE ===');
 });
 
 whatsappClient.on('ready', () => {
-  console.log('WhatsApp client is ready!');
-  whatsappReady = true;
-  checkAndSendInitialConfirmation();
+  try {
+    console.log('WhatsApp client is ready!');
+    whatsappReady = true;
+    checkAndSendInitialConfirmation();
+  } catch (error) {
+    console.error('Error in WhatsApp ready handler:', error.message);
+  }
 });
 
 whatsappClient.on('auth_failure', (msg) => {
   console.error('WhatsApp authentication failed:', msg);
 });
 
-// Initialize WhatsApp
-whatsappClient.initialize();
+// WhatsApp will be initialized after server starts
 
 async function checkAndSendInitialConfirmation() {
   if (initialConfirmationSent) return;
@@ -425,9 +432,22 @@ app.get('/whatsapp-qr', (req, res) => {
   });
 });
 
+// Start the server immediately, then initialize WhatsApp
 app.listen(PORT, () => {
   console.log(`Server listening on :${PORT}`);
-  startPolling();
+  console.log('Express server is ready - health checks should pass now');
+  
+  // Initialize WhatsApp after server is ready
+  setTimeout(() => {
+    console.log('Starting WhatsApp initialization...');
+    whatsappClient.initialize();
+  }, 2000);
+  
+  // Start polling after a delay to ensure everything is ready
+  setTimeout(() => {
+    console.log('Starting polling loop...');
+    startPolling();
+  }, 5000);
 });
 
 
