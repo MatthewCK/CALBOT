@@ -26,6 +26,7 @@ const whatsappClient = new Client({
 });
 
 let whatsappReady = false;
+let initialConfirmationSent = false;
 
 // WhatsApp event handlers
 whatsappClient.on('qr', (qr) => {
@@ -36,6 +37,7 @@ whatsappClient.on('qr', (qr) => {
 whatsappClient.on('ready', () => {
   console.log('WhatsApp client is ready!');
   whatsappReady = true;
+  checkAndSendInitialConfirmation();
 });
 
 whatsappClient.on('auth_failure', (msg) => {
@@ -44,6 +46,26 @@ whatsappClient.on('auth_failure', (msg) => {
 
 // Initialize WhatsApp
 whatsappClient.initialize();
+
+async function checkAndSendInitialConfirmation() {
+  if (initialConfirmationSent) return;
+  
+  try {
+    // Test MLB API by fetching Cal's stats
+    console.log('Testing MLB API for initial confirmation...');
+    const calStats = await fetchCalSeasonStats();
+    
+    if (whatsappReady && calStats) {
+      const message = `🚨🚨🚨 CAL DINGER BOT IS READY! 🚨🚨🚨\n\n⚾ WhatsApp: ✅ Connected\n📊 MLB API: ✅ Responding\n🏟️ Cal's ${CURRENT_SEASON} Stats:\n   • HR: ${calStats.homeRuns}\n   • RBI: ${calStats.rbi}\n   • AVG: ${calStats.avg}\n   • OPS: ${calStats.ops}\n\n🔍 Monitoring for Cal dingers... ⚾💥`;
+      
+      await sendWhatsApp(message);
+      initialConfirmationSent = true;
+      console.log('Initial confirmation message sent!');
+    }
+  } catch (error) {
+    console.log('MLB API not ready yet, will retry on next poll cycle');
+  }
+}
 
 function getTodayDateString() {
   const now = new Date();
@@ -221,6 +243,11 @@ let pollTimer = null;
 
 async function pollLoop() {
   try {
+    // Check for initial confirmation if not sent yet
+    if (!initialConfirmationSent && whatsappReady) {
+      await checkAndSendInitialConfirmation();
+    }
+    
     if (!currentGamePk) {
       console.log('No current gamePk, searching for today\'s Mariners game...');
       currentGamePk = await findTodayMarinersGamePk();
