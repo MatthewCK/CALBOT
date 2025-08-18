@@ -320,10 +320,11 @@ async function sendCalAtBatResult(gamePk) {
 
 function getTodayDateString() {
   const now = new Date();
-  // Use current year for MLB season
-  const y = now.getFullYear();
-  const m = String(now.getUTCMonth() + 1).padStart(2, '0');
-  const d = String(now.getUTCDate()).padStart(2, '0');
+  // Use Pacific Time for MLB games (Mariners are in Seattle)
+  const pacificTime = new Date(now.toLocaleString("en-US", {timeZone: "America/Los_Angeles"}));
+  const y = pacificTime.getFullYear();
+  const m = String(pacificTime.getMonth() + 1).padStart(2, '0');
+  const d = String(pacificTime.getDate()).padStart(2, '0');
   return `${y}-${m}-${d}`;
 }
 
@@ -470,6 +471,17 @@ async function checkForCalDingers(gamePk) {
     const feed = await fetchLiveFeed(gamePk);
     const allPlays = feed?.liveData?.plays?.allPlays || [];
     console.log(`Checking ${allPlays.length} plays for Cal dingers...`);
+
+    // Update currentGameInfo status from live feed for accurate polling intervals
+    if (currentGameInfo && feed?.gameData?.status) {
+      const oldStatus = currentGameInfo.status?.detailedState;
+      const newStatus = feed.gameData.status.detailedState;
+      
+      if (oldStatus !== newStatus) {
+        console.log(`Game status updated: ${oldStatus} -> ${newStatus}`);
+        currentGameInfo.status = feed.gameData.status;
+      }
+    }
 
     for (const play of allPlays) {
       if (!isHomeRunPlay(play)) continue;
