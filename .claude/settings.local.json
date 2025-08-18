@@ -2,6 +2,9 @@
   "permissions": {
     "additionalDirectories": [
       "C:\\c\\Users\\mkeip\\.cursor\\projects"
+    ],
+    "allow": [
+      "Bash(node:*)"
     ]
   }
 }

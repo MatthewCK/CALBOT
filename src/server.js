@@ -17,6 +17,13 @@ const CURRENT_SEASON = new Date().getFullYear();
 // Polling interval in ms
 const POLL_INTERVAL_MS = Number(process.env.POLL_INTERVAL_MS || 15000);
 
+// Home run wager data
+const WAGER_DATA = {
+  Tim: [54, 55, 56, 60],
+  Austin: [53, 57, 58, 59], 
+  Matt: [61, 62, 63, 64]
+};
+
 // Log configuration on startup
 console.log('=== CAL DINGER BOT STARTUP ===');
 console.log('Port:', PORT);
@@ -100,7 +107,7 @@ async function checkAndSendInitialConfirmation() {
     const calStats = await fetchCalSeasonStats();
     
     if (whatsappReady && calStats) {
-      const message = `🚨🚨🚨 CAL DINGER BOT IS READY! 🚨🚨🚨\n\n⚾ WhatsApp: ✅ Connected\n📊 MLB API: ✅ Responding\n🏟️ Cal's ${CURRENT_SEASON} Stats:\n   • HR: ${calStats.homeRuns}\n   • RBI: ${calStats.rbi}\n   • AVG: ${calStats.avg}\n   • OPS: ${calStats.ops}\n\n🔍 Monitoring for Cal dingers... ⚾💥`;
+      const message = `🚨🚨🚨 CAL DINGER BOT IS READY! 🚨🚨🚨\n\n⚾ WhatsApp: ✅ Connected\n📊 MLB API: ✅ Responding\n🏟️ Cal's ${CURRENT_SEASON} Stats:\n   • HR: ${calStats.homeRuns}\n   • RBI: ${calStats.rbi}\n   • AVG: ${calStats.avg}\n   • OPS: ${calStats.ops}\n\n🔍 Monitoring for Cal dingers... ⚾💥${formatWagerSection(calStats.homeRuns, calStats)}`;
       
       await sendWhatsApp(message);
       initialConfirmationSent = true;
@@ -149,7 +156,7 @@ async function checkAndSendGameStartNotification(gamePk) {
         timeZone: 'America/Los_Angeles'
       });
       
-      const message = `⚾🚨 MARINERS GAME STARTED! 🚨⚾\n\n🏟️ ${awayTeam} @ ${homeTeam}\n📍 ${venue}\n🕐 ${gameTime} PT\n\n🏆 Cal's ${CURRENT_SEASON} Stats:\n   • HR: ${calStats.homeRuns}\n   • RBI: ${calStats.rbi}\n   • AVG: ${calStats.avg}\n   • OPS: ${calStats.ops}\n\n🔍 Monitoring for Cal dingers... ⚾💥`;
+      const message = `⚾🚨 MARINERS GAME STARTED! 🚨⚾\n\n🏟️ ${awayTeam} @ ${homeTeam}\n📍 ${venue}\n🕐 ${gameTime} PT\n\n🏆 Cal's ${CURRENT_SEASON} Stats:\n   • HR: ${calStats.homeRuns}\n   • RBI: ${calStats.rbi}\n   • AVG: ${calStats.avg}\n   • OPS: ${calStats.ops}\n\n🔍 Monitoring for Cal dingers... ⚾💥${formatWagerSection(calStats.homeRuns, calStats)}`;
       
       await sendWhatsApp(message);
       gameStartNotificationSent = true;
@@ -402,13 +409,14 @@ async function fetchCalSeasonStats() {
         homeRuns: stats.homeRuns || 0,
         rbi: stats.rbi || 0,
         avg: stats.avg || 0,
-        ops: stats.ops || 0
+        ops: stats.ops || 0,
+        gamesPlayed: stats.gamesPlayed || 0
       };
     }
-    return { homeRuns: 0, rbi: 0, avg: 0, ops: 0 };
+    return { homeRuns: 0, rbi: 0, avg: 0, ops: 0, gamesPlayed: 0 };
   } catch (error) {
     console.error('Error fetching Cal\'s season stats:', error.message);
-    return { homeRuns: 0, rbi: 0, avg: 0, ops: 0 };
+    return { homeRuns: 0, rbi: 0, avg: 0, ops: 0, gamesPlayed: 0 };
   }
 }
 
@@ -436,6 +444,138 @@ async function sendWhatsApp(message) {
   }
 }
 
+function calculateSeasonProjection(currentHRs, seasonStats = null) {
+  // MLB regular season is 162 games
+  const TOTAL_GAMES = 162;
+  
+  // Get games played from season stats, or estimate if not available
+  let gamesPlayed;
+  if (seasonStats && seasonStats.gamesPlayed) {
+    gamesPlayed = seasonStats.gamesPlayed;
+  } else {
+    // Fallback: estimate based on current date if stats not available
+    const now = new Date();
+    const seasonStart = new Date(now.getFullYear(), 3, 1); // April 1st
+    const seasonEnd = new Date(now.getFullYear(), 8, 30); // September 30th
+    const dateProgress = Math.max(0, Math.min(1, (now - seasonStart) / (seasonEnd - seasonStart)));
+    gamesPlayed = Math.round(dateProgress * TOTAL_GAMES);
+  }
+  
+  const progressPercent = Math.max(0, Math.min(1, gamesPlayed / TOTAL_GAMES));
+  
+  if (progressPercent === 0 || gamesPlayed === 0) return currentHRs; // Season hasn't started
+  
+  // Project full season based on current pace
+  return Math.round(currentHRs / progressPercent);
+}
+
+function calculateWagerProbabilities(currentHRs, projectedHRs, seasonStats = null) {
+  // Use games played instead of dates for more accurate progress
+  const TOTAL_GAMES = 162;
+  
+  let gamesPlayed;
+  if (seasonStats && seasonStats.gamesPlayed) {
+    gamesPlayed = seasonStats.gamesPlayed;
+  } else {
+    // Fallback: estimate based on current date if stats not available
+    const now = new Date();
+    const seasonStart = new Date(now.getFullYear(), 3, 1); // April 1st
+    const seasonEnd = new Date(now.getFullYear(), 8, 30); // September 30th
+    const dateProgress = Math.max(0, Math.min(1, (now - seasonStart) / (seasonEnd - seasonStart)));
+    gamesPlayed = Math.round(dateProgress * TOTAL_GAMES);
+  }
+  
+  const seasonProgress = Math.max(0, Math.min(1, gamesPlayed / TOTAL_GAMES));
+  const remainingProgress = 1 - seasonProgress;
+  
+  // Standard deviation decreases as season progresses (more certainty)
+  // Early season: high uncertainty (~8 HRs), late season: low uncertainty (~2 HRs)
+  const baseStdDev = 2 + (remainingProgress * 6);
+  
+  // Get all possible winning numbers
+  const allWinningNumbers = new Set();
+  Object.values(WAGER_DATA).forEach(numbers => {
+    numbers.forEach(num => allWinningNumbers.add(num));
+  });
+  
+  // Calculate probability for each possible HR total using normal distribution approximation
+  const probabilities = {};
+  let totalWinProbability = 0;
+  
+  for (const [person, numbers] of Object.entries(WAGER_DATA)) {
+    let personProbability = 0;
+    
+    // Calculate probability Cal hits any of this person's numbers
+    for (const targetHR of numbers) {
+      // Simplified normal distribution probability
+      // P(X = targetHR) ≈ probability density around that point
+      const distance = Math.abs(targetHR - projectedHRs);
+      const probability = Math.exp(-(distance * distance) / (2 * baseStdDev * baseStdDev));
+      personProbability += probability;
+    }
+    
+    probabilities[person] = personProbability;
+    totalWinProbability += personProbability;
+  }
+  
+  // Normalize probabilities and convert to percentages
+  const normalizationFactor = Math.min(0.85, totalWinProbability); // Cap total win probability at 85%
+  const results = {};
+  
+  for (const [person, rawProb] of Object.entries(probabilities)) {
+    const normalizedProb = normalizationFactor > 0 ? (rawProb / totalWinProbability) * normalizationFactor : 0;
+    
+    results[person] = {
+      numbers: WAGER_DATA[person],
+      probability: Math.max(0.01, normalizedProb), // Minimum 1% chance
+      inRange: WAGER_DATA[person].some(num => Math.abs(num - projectedHRs) <= 2) // Within 2 HRs of projection
+    };
+  }
+  
+  // Calculate "no winner" probability
+  const totalAssignedProb = Object.values(results).reduce((sum, data) => sum + data.probability, 0);
+  results['No Winner'] = {
+    numbers: ['Other'],
+    probability: Math.max(0.05, 1 - totalAssignedProb), // At least 5% chance no one wins
+    inRange: false
+  };
+  
+  return results;
+}
+
+function formatWagerSection(currentHRs, seasonStats = null) {
+  const projectedHRs = calculateSeasonProjection(currentHRs, seasonStats);
+  const probabilities = calculateWagerProbabilities(currentHRs, projectedHRs, seasonStats);
+  
+  let wagerText = `\n\n🎯 WAGER UPDATE 🎯\n`;
+  wagerText += `📊 Current: ${currentHRs} HR\n`;
+  wagerText += `📈 Linear Projection: ${projectedHRs} HR\n\n`;
+  
+  // Separate players from "No Winner" and sort by probability (highest first)
+  const playerResults = Object.entries(probabilities)
+    .filter(([person]) => person !== 'No Winner')
+    .sort(([,a], [,b]) => b.probability - a.probability);
+  
+  const noWinnerResult = probabilities['No Winner'];
+  
+  playerResults.forEach(([person, data], index) => {
+    const emoji = index === 0 ? '🥇' : index === 1 ? '🥈' : '🥉';
+    const percentStr = (data.probability * 100).toFixed(0);
+    const numbersStr = data.numbers.join(',');
+    const indicator = data.inRange ? '🎯' : '';
+    
+    wagerText += `${emoji} ${person}: ${percentStr}% (${numbersStr}) ${indicator}\n`;
+  });
+  
+  // Add "No Winner" at the end
+  if (noWinnerResult) {
+    const percentStr = (noWinnerResult.probability * 100).toFixed(0);
+    wagerText += `❌ No Winner: ${percentStr}%\n`;
+  }
+  
+  return wagerText;
+}
+
 function formatHrMessage(play, seasonStats = null) {
   const inningHalf = play?.about?.isTopInning ? 'Top' : 'Bottom';
   const inning = play?.about?.inning;
@@ -458,7 +598,11 @@ function formatHrMessage(play, seasonStats = null) {
     distance ? `${distance} ft 🚀` : undefined,
     `Season HR #${newSeasonTotal} 🏆`,
   ].filter(Boolean);
-  return bits.join(' • ');
+  
+  const mainMessage = bits.join(' • ');
+  const wagerSection = formatWagerSection(newSeasonTotal, seasonStats);
+  
+  return mainMessage + wagerSection;
 }
 
 async function checkForCalDingers(gamePk) {
@@ -566,19 +710,43 @@ async function pollLoop() {
     // Update polling interval for next cycle
     updatePollInterval();
     
+    // Schedule next poll based on nextPollTime
+    scheduleNextPoll();
+    
   } catch (err) {
     console.error('Poll loop error:', err?.message || err);
     // Reset currentGamePk on error to retry finding a game
     currentGamePk = null;
     currentGameInfo = null;
     calIsUpToBat = false;
+    // Schedule retry in 30 seconds on error
+    scheduleNextPoll(30000);
   }
+}
+
+function scheduleNextPoll(overrideDelay = null) {
+  // Clear existing timer
+  if (pollTimer) {
+    clearTimeout(pollTimer);
+    pollTimer = null;
+  }
+  
+  let delay;
+  if (overrideDelay !== null) {
+    delay = overrideDelay;
+  } else if (nextPollTime) {
+    delay = Math.max(0, nextPollTime.getTime() - Date.now());
+  } else {
+    delay = 5000; // Default 5 seconds if no nextPollTime set
+  }
+  
+  console.log(`Next poll scheduled in ${Math.round(delay / 1000)} seconds`);
+  pollTimer = setTimeout(pollLoop, delay);
 }
 
 function startPolling() {
   if (pollTimer) return;
-  // Use a shorter base interval (5 seconds) for more responsive polling
-  pollTimer = setInterval(pollLoop, 5000);
+  console.log('Starting dynamic polling system...');
   // Kick off immediately
   pollLoop();
 }
