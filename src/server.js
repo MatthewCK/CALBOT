@@ -29,16 +29,16 @@ const WAGER_DATA = {
 };
 
 // Log configuration on startup
-console.log('=== CAL DINGER BOT STARTUP ===');
-console.log('Port:', PORT);
-console.log('Recipient Numbers:', RECIPIENT_NUMBERS.length > 0 ? RECIPIENT_NUMBERS : 'Not configured');
-console.log('Group Chat ID:', GROUP_CHAT_ID || 'Not configured');
-console.log('Cal Raleigh Player ID:', CAL_RALEIGH_PLAYER_ID);
-console.log('Mariners Team ID:', MARINERS_TEAM_ID);
-console.log('Current Season:', CURRENT_SEASON);
-console.log('Poll Interval (ms):', POLL_INTERVAL_MS);
-console.log('Enhanced PA Notifications:', ENHANCED_PA ? 'Enabled' : 'Disabled (home runs only)');
-console.log('================================');
+console.log(`[${getTimestamp()}] === CAL DINGER BOT STARTUP ===`);
+console.log(`[${getTimestamp()}] Port:`, PORT);
+console.log(`[${getTimestamp()}] Recipient Numbers:`, RECIPIENT_NUMBERS.length > 0 ? RECIPIENT_NUMBERS : 'Not configured');
+console.log(`[${getTimestamp()}] Group Chat ID:`, GROUP_CHAT_ID || 'Not configured');
+console.log(`[${getTimestamp()}] Cal Raleigh Player ID:`, CAL_RALEIGH_PLAYER_ID);
+console.log(`[${getTimestamp()}] Mariners Team ID:`, MARINERS_TEAM_ID);
+console.log(`[${getTimestamp()}] Current Season:`, CURRENT_SEASON);
+console.log(`[${getTimestamp()}] Poll Interval (ms):`, POLL_INTERVAL_MS);
+console.log(`[${getTimestamp()}] Enhanced PA Notifications:`, ENHANCED_PA ? 'Enabled' : 'Disabled (home runs only)');
+console.log(`[${getTimestamp()}] ================================`);
 
 // Initialize WhatsApp client
 const whatsappClient = new Client({
@@ -65,15 +65,20 @@ const cache = {
   dateString: { data: null, timestamp: 0, ttl: 3600000 } // 1 hour
 };
 
+// Helper function to get timestamp for logging
+function getTimestamp() {
+  return new Date().toISOString();
+}
+
 // Helper function for consistent notification handling
 async function sendNotificationIfEnabled(message, notificationType) {
   const shouldSend = ENHANCED_PA || notificationType === 'dinger' || notificationType === 'initialization';
   
   if (shouldSend) {
     await sendWhatsApp(message);
-    console.log(`${notificationType} notification sent`);
+    console.log(`[${getTimestamp()}] ${notificationType} notification sent`);
   } else {
-    console.log(`${notificationType} notification skipped (ENHANCED_PA disabled)`);
+    console.log(`[${getTimestamp()}] ${notificationType} notification skipped (ENHANCED_PA disabled)`);
   }
 }
 
@@ -119,7 +124,7 @@ async function fetchCalSeasonStats() {
     cache.calStats.timestamp = now;
     return result;
   } catch (error) {
-    console.error('Error fetching Cal season stats:', error.message);
+    console.error(`[${getTimestamp()}] Error fetching Cal season stats:`, error.message);
     return cache.calStats.data; // Return cached data if available
   }
 }
@@ -134,7 +139,7 @@ async function fetchLiveFeed(gamePk) {
   }
 
   try {
-    const url = `https://statsapi.mlb.com/api/v1/game/${gamePk}/feed/live`;
+    const url = `https://statsapi.mlb.com/api/v1.1/game/${gamePk}/feed/live`;
     const response = await fetchJson(url);
     
     cache.liveFeed.data = response;
@@ -143,11 +148,11 @@ async function fetchLiveFeed(gamePk) {
     return response;
   } catch (error) {
     if (error.message.includes('404')) {
-      console.log('Live feed not available (game likely finished or not started)');
+      console.log(`[${getTimestamp()}] Live feed not available (game likely finished or not started)`);
       // Clear game tracking if it's a 404 - game is probably finished
       return null;
     }
-    console.error('Error fetching live feed:', error.message);
+    console.error(`[${getTimestamp()}] Error fetching live feed:`, error.message);
     return cache.liveFeed.data; // Return cached data if available
   }
 }
@@ -156,53 +161,53 @@ async function fetchLiveFeed(gamePk) {
 whatsappClient.on('qr', (qr) => {
   try {
     currentQRCode = qr;
-    console.log('=== WHATSAPP QR CODE ===');
-    console.log('QR Code Data (copy this to a QR code generator if needed):');
-    console.log(qr);
-    console.log('--- End QR Code Data ---');
+    console.log(`[${getTimestamp()}] === WHATSAPP QR CODE ===`);
+    console.log(`[${getTimestamp()}] QR Code Data (copy this to a QR code generator if needed):`);
+    console.log(`[${getTimestamp()}]`, qr);
+    console.log(`[${getTimestamp()}] --- End QR Code Data ---`);
     
     // Try to generate a more compatible QR code
     try {
-      console.log('Alternative QR Code (if terminal supports it):');
+      console.log(`[${getTimestamp()}] Alternative QR Code (if terminal supports it):`);
       qrcode.generate(qr, { small: true });
     } catch (error) {
-      console.log('Terminal QR code generation failed, using data only');
+      console.log(`[${getTimestamp()}] Terminal QR code generation failed, using data only`);
     }
     
-    console.log('=== END WHATSAPP QR CODE ===');
+    console.log(`[${getTimestamp()}] === END WHATSAPP QR CODE ===`);
   } catch (error) {
-    console.error('Error handling QR code:', error.message);
+    console.error(`[${getTimestamp()}] Error handling QR code:`, error.message);
   }
 });
 
 whatsappClient.on('ready', () => {
   try {
-    console.log('WhatsApp client is ready!');
+    console.log(`[${getTimestamp()}] WhatsApp client is ready!`);
     whatsappReady = true;
     // Add a small delay to prevent race conditions
     setTimeout(() => {
       checkAndSendInitialConfirmation();
     }, 1000);
   } catch (error) {
-    console.error('Error in WhatsApp ready handler:', error.message);
+    console.error(`[${getTimestamp()}] Error in WhatsApp ready handler:`, error.message);
   }
 });
 
 whatsappClient.on('auth_failure', (msg) => {
-  console.error('WhatsApp authentication failed:', msg);
+  console.error(`[${getTimestamp()}] WhatsApp authentication failed:`, msg);
 });
 
 // WhatsApp will be initialized after server starts
 
 async function checkAndSendInitialConfirmation() {
   if (initialConfirmationSent) {
-    console.log('Initial confirmation already sent, skipping...');
+    console.log(`[${getTimestamp()}] Initial confirmation already sent, skipping...`);
     return;
   }
   
   try {
     // Test MLB API by fetching Cal's stats
-    console.log('Testing MLB API for initial confirmation...');
+    console.log(`[${getTimestamp()}] Testing MLB API for initial confirmation...`);
     const calStats = await fetchCalSeasonStats();
     
     if (whatsappReady && calStats) {
@@ -211,24 +216,24 @@ async function checkAndSendInitialConfirmation() {
       await sendNotificationIfEnabled(message, 'initialization');
       initialConfirmationSent = true;
     } else {
-      console.log('Not ready for initial confirmation yet:', {
+      console.log(`[${getTimestamp()}] Not ready for initial confirmation yet:`, {
         whatsappReady,
         hasCalStats: !!calStats
       });
     }
   } catch (error) {
-    console.log('MLB API not ready yet, will retry on next poll cycle:', error.message);
+    console.log(`[${getTimestamp()}] MLB API not ready yet, will retry on next poll cycle:`, error.message);
   }
 }
 
 async function checkAndSendGameStartNotification(gamePk) {
   if (gameStartNotificationSent) {
-    console.log('Game start notification already sent, skipping...');
+    console.log(`[${getTimestamp()}] Game start notification already sent, skipping...`);
     return;
   }
   
   try {
-    console.log('Checking for game start notification...');
+    console.log(`[${getTimestamp()}] Checking for game start notification...`);
     
     // Get game details
     const scheduleUrl = `https://statsapi.mlb.com/api/v1/schedule?date=${getTodayDateString()}&teamId=${MARINERS_TEAM_ID}&sportId=1`;
@@ -259,10 +264,10 @@ async function checkAndSendGameStartNotification(gamePk) {
       await sendNotificationIfEnabled(message, 'gamestart');
       gameStartNotificationSent = true;
     } else {
-      console.log('Game not in progress yet:', gameInfo?.status?.detailedState);
+      console.log(`[${getTimestamp()}] Game not in progress yet:`, gameInfo?.status?.detailedState);
     }
   } catch (error) {
-    console.error('Error checking for game start notification:', error.message);
+    console.error(`[${getTimestamp()}] Error checking for game start notification:`, error.message);
   }
 }
 
@@ -283,12 +288,12 @@ function setNextPollTime() {
   
   if (calIsUpToBat) {
     nextPollTime = new Date(now + POLL_INTERVALS.CAL_BATTING);
-    console.log('Cal is up to bat - switching to 10-second polling');
+    console.log(`[${getTimestamp()}] Cal is up to bat - switching to 10-second polling`);
     return;
   }
   
   if (!currentGameInfo) {
-    console.log('No game info available');
+    console.log(`[${getTimestamp()}] No game info available`);
     return;
   }
   
@@ -296,7 +301,14 @@ function setNextPollTime() {
   
   if (gameStatus === 'In Progress') {
     nextPollTime = new Date(now + POLL_INTERVALS.GAME_ACTIVE);
-    console.log('Game in progress - polling every 30 seconds');
+    console.log(`[${getTimestamp()}] Game in progress - polling every 30 seconds`);
+    return;
+  }
+  
+  // Check if game is finished - if so, we need to search for next game
+  if (gameStatus === 'Final' || gameStatus === 'Game Over' || gameStatus === 'Completed Early') {
+    console.log(`[${getTimestamp()}] Game finished (${gameStatus}) - will search for next game`);
+    // Don't set a poll time here - let the main loop reset and find next game
     return;
   }
   
@@ -308,11 +320,11 @@ function setNextPollTime() {
     // Wait until 30 minutes before game
     nextPollTime = new Date(thirtyMinutesBeforeGame);
     const minutesUntil = Math.round((thirtyMinutesBeforeGame - now) / 60000);
-    console.log(`Waiting ${minutesUntil} minutes until 30min before game`);
+    console.log(`[${getTimestamp()}] Waiting ${minutesUntil} minutes until 30min before game`);
   } else {
     // Within 30 minutes of game start - poll every 5 minutes
     nextPollTime = new Date(now + POLL_INTERVALS.GAME_PREGAME);
-    console.log('Pre-game polling - every 5 minutes');
+    console.log(`[${getTimestamp()}] Pre-game polling - every 5 minutes`);
   }
 }
 
@@ -327,7 +339,7 @@ async function checkIfCalIsUpToBat(gamePk) {
     const currentBatter = liveData?.plays?.currentPlay?.matchup?.batter;
     if (currentBatter && String(currentBatter.id) === String(CAL_RALEIGH_PLAYER_ID)) {
       if (!calIsUpToBat) {
-        console.log('🚨 CAL IS UP TO BAT! 🚨');
+        console.log(`[${getTimestamp()}] 🚨 CAL IS UP TO BAT! 🚨`);
         calIsUpToBat = true;
         setNextPollTime();
         
@@ -340,7 +352,7 @@ async function checkIfCalIsUpToBat(gamePk) {
     
     // Check if Cal just finished his at-bat
     if (calIsUpToBat) {
-      console.log('Cal finished his at-bat, switching back to 30-second polling');
+      console.log(`[${getTimestamp()}] Cal finished his at-bat, switching back to 30-second polling`);
       calIsUpToBat = false;
       setNextPollTime();
       
@@ -352,7 +364,7 @@ async function checkIfCalIsUpToBat(gamePk) {
     
     return false;
   } catch (error) {
-    console.error('Error checking if Cal is up to bat:', error.message);
+    console.error(`[${getTimestamp()}] Error checking if Cal is up to bat:`, error.message);
     return false;
   }
 }
@@ -390,7 +402,7 @@ async function sendCalAtBatResult(gamePk) {
     // Check if this is a home run - if so, skip the at-bat result since we already sent the dinger message
     const eventType = result.eventType || '';
     if (eventType === 'home_run') {
-      console.log('Skipping at-bat result for home run - dinger message already sent');
+      console.log(`[${getTimestamp()}] Skipping at-bat result for home run - dinger message already sent`);
       return;
     }
     
@@ -424,7 +436,7 @@ async function sendCalAtBatResult(gamePk) {
     await sendNotificationIfEnabled(message, 'atbat');
     
   } catch (error) {
-    console.error('Error sending Cal at-bat result:', error.message);
+    console.error(`[${getTimestamp()}] Error sending Cal at-bat result:`, error.message);
   }
 }
 
@@ -460,31 +472,31 @@ function batterIsCal(play) {
 async function findTodayMarinersGamePk() {
   const date = getTodayDateString();
   const url = `https://statsapi.mlb.com/api/v1/schedule?date=${date}&teamId=${MARINERS_TEAM_ID}&sportId=1`;
-  console.log('Fetching schedule from:', url);
+  console.log(`[${getTimestamp()}] Fetching schedule from:`, url);
   
   try {
     const data = await fetchJson(url);
-    console.log('Schedule response:', JSON.stringify(data, null, 2));
+    console.log(`[${getTimestamp()}] Schedule response:`, JSON.stringify(data, null, 2));
     
     const dates = data?.dates || [];
     for (const day of dates) {
       for (const game of (day?.games || [])) {
         const status = game.status?.detailedState;
-        console.log('Found game:', game.gamePk, status);
+        console.log(`[${getTimestamp()}] Found game:`, game.gamePk, status);
         
         // Only return games that are not finished
-        if (status !== 'Final' && status !== 'Completed Early' && status !== 'Cancelled' && status !== 'Postponed') {
-          console.log('Tracking active/scheduled game:', game.gamePk);
+        if (status !== 'Final' && status !== 'Game Over' && status !== 'Completed Early' && status !== 'Cancelled' && status !== 'Postponed') {
+          console.log(`[${getTimestamp()}] Tracking active/scheduled game:`, game.gamePk);
           return game.gamePk;
         } else {
-          console.log('Skipping finished game:', game.gamePk, status);
+          console.log(`[${getTimestamp()}] Skipping finished game:`, game.gamePk, status);
         }
       }
     }
-    console.log('No games found for date:', date);
+    console.log(`[${getTimestamp()}] No games found for date:`, date);
     return null;
   } catch (error) {
-    console.error('Error fetching schedule:', error.message);
+    console.error(`[${getTimestamp()}] Error fetching schedule:`, error.message);
     return null;
   }
 }
@@ -493,7 +505,7 @@ async function findNextMarinersGame() {
   try {
     // Check next 7 days for upcoming games
     const today = getTodayDateString(); // Use same date logic as rest of app
-    console.log('Today is:', today);
+    console.log(`[${getTimestamp()}] Today is:`, today);
     
     for (let i = 1; i <= 7; i++) {
       // Calculate next date using Pacific Time like the rest of the app
@@ -505,31 +517,31 @@ async function findNextMarinersGame() {
       const d = String(checkDate.getDate()).padStart(2, '0');
       const dateString = `${y}-${m}-${d}`;
       
-      console.log(`Checking for games on: ${dateString} (${i} days from today)`);
+      console.log(`[${getTimestamp()}] Checking for games on: ${dateString} (${i} days from today)`);
       
       const url = `https://statsapi.mlb.com/api/v1/schedule?date=${dateString}&teamId=${MARINERS_TEAM_ID}&sportId=1`;
       
       const data = await fetchJson(url);
       const dates = data?.dates || [];
       
-      console.log(`Schedule data for ${dateString}:`, JSON.stringify(data, null, 2));
+      console.log(`[${getTimestamp()}] Schedule data for ${dateString}:`, JSON.stringify(data, null, 2));
       
       for (const day of dates) {
         for (const game of (day?.games || [])) {
           const status = game.status?.detailedState;
-          console.log(`Found game on ${dateString}: ${game.gamePk} - ${status}`);
+          console.log(`[${getTimestamp()}] Found game on ${dateString}: ${game.gamePk} - ${status}`);
           
           if (status !== 'Final' && status !== 'Completed Early' && status !== 'Cancelled' && status !== 'Postponed') {
-            console.log(`Next Mariners game found: ${dateString} at ${game.gameDate}`);
+            console.log(`[${getTimestamp()}] Next Mariners game found: ${dateString} at ${game.gameDate}`);
             return new Date(game.gameDate);
           }
         }
       }
     }
-    console.log('No upcoming Mariners games found in next 7 days');
+    console.log(`[${getTimestamp()}] No upcoming Mariners games found in next 7 days`);
     return null;
   } catch (error) {
-    console.error('Error finding next Mariners game:', error.message);
+    console.error(`[${getTimestamp()}] Error finding next Mariners game:`, error.message);
     return null;
   }
 }
@@ -538,11 +550,11 @@ async function findNextMarinersGame() {
 
 async function sendWhatsApp(message) {
   if (!whatsappReady) {
-    console.log('WhatsApp not ready; skipping message:', message);
+    console.log(`[${getTimestamp()}] WhatsApp not ready; skipping message:`, message);
     return;
   }
   if (!GROUP_CHAT_ID && RECIPIENT_NUMBERS.length === 0) {
-    console.log('No group chat ID or recipient numbers configured; skipping WhatsApp message');
+    console.log(`[${getTimestamp()}] No group chat ID or recipient numbers configured; skipping WhatsApp message`);
     return;
   }
   
@@ -559,10 +571,10 @@ async function sendWhatsApp(message) {
         const chatId = `${formattedNumber}@c.us`;
         
         await whatsappClient.sendMessage(chatId, message);
-        console.log(`WhatsApp message sent to ${number}`);
+        console.log(`[${getTimestamp()}] WhatsApp message sent to ${number}`);
         successCount++;
       } catch (error) {
-        console.error(`Failed to send WhatsApp to ${number}:`, error.message);
+        console.error(`[${getTimestamp()}] Failed to send WhatsApp to ${number}:`, error.message);
       }
     }
   }
@@ -572,14 +584,14 @@ async function sendWhatsApp(message) {
     totalTargets += 1;
     try {
       await whatsappClient.sendMessage(GROUP_CHAT_ID, message);
-      console.log(`WhatsApp message sent to group chat: ${GROUP_CHAT_ID}`);
+      console.log(`[${getTimestamp()}] WhatsApp message sent to group chat: ${GROUP_CHAT_ID}`);
       successCount++;
     } catch (error) {
-      console.error(`Failed to send WhatsApp to group ${GROUP_CHAT_ID}:`, error.message);
+      console.error(`[${getTimestamp()}] Failed to send WhatsApp to group ${GROUP_CHAT_ID}:`, error.message);
     }
   }
   
-  console.log(`WhatsApp delivery: ${successCount}/${totalTargets} successful`);
+  console.log(`[${getTimestamp()}] WhatsApp delivery: ${successCount}/${totalTargets} successful`);
 }
 
 function calculateSeasonProjection(currentHRs, seasonStats = null) {
@@ -687,7 +699,7 @@ function formatWagerSection(currentHRs, seasonStats = null) {
   
   let wagerText = `\n\n🎯 WAGER UPDATE\n`;
   wagerText += `Current: ${currentHRs} HR\n`;
-  wagerText += `Projected: ${projectedHRs} HR\n\n`;
+  wagerText += `Linear Projection: ${projectedHRs} HR\n\n`;
   
   // Separate players from "No Winner" and sort by probability (highest first)
   const playerResults = Object.entries(probabilities)
@@ -792,14 +804,14 @@ function formatHrMessage(play, seasonStats = null, gameFeed = null) {
 
 async function checkForCalDingers(gamePk) {
   if (!gamePk) {
-    console.log('No gamePk provided, skipping Cal dinger check');
+    console.log(`[${getTimestamp()}] No gamePk provided, skipping Cal dinger check`);
     return;
   }
   
   try {
     const feed = await fetchLiveFeed(gamePk);
     const allPlays = feed?.liveData?.plays?.allPlays || [];
-    console.log(`Checking ${allPlays.length} plays for Cal dingers...`);
+    console.log(`[${getTimestamp()}] Checking ${allPlays.length} plays for Cal dingers...`);
 
     // Update currentGameInfo status from live feed for accurate polling intervals
     if (currentGameInfo && feed?.gameData?.status) {
@@ -807,7 +819,7 @@ async function checkForCalDingers(gamePk) {
       const newStatus = feed.gameData.status.detailedState;
       
       if (oldStatus !== newStatus) {
-        console.log(`Game status updated: ${oldStatus} -> ${newStatus}`);
+        console.log(`[${getTimestamp()}] Game status updated: ${oldStatus} -> ${newStatus}`);
         currentGameInfo.status = feed.gameData.status;
       }
     }
@@ -820,14 +832,14 @@ async function checkForCalDingers(gamePk) {
 
       // Send the special dinger message for home runs
       const seasonStats = await fetchCalSeasonStats();
-      console.log('Cal\'s current season stats:', seasonStats);
+      console.log(`[${getTimestamp()}] Cal's current season stats:`, seasonStats);
       const msg = formatHrMessage(play, seasonStats, feed);
-      console.log('Detected HR by Cal Raleigh:', msg);
+      console.log(`[${getTimestamp()}] Detected HR by Cal Raleigh:`, msg);
       await sendWhatsApp(msg);
       if (eventId) notifiedEventIds.add(eventId);
     }
   } catch (error) {
-    console.error('Error checking for Cal dingers:', error.message);
+    console.error(`[${getTimestamp()}] Error checking for Cal dingers:`, error.message);
   }
 }
 
@@ -849,7 +861,7 @@ async function pollLoop() {
     // Reset flags if it's a new day
     const today = getTodayDateString();
     if (lastCheckedDate && lastCheckedDate !== today) {
-      console.log('New day detected, resetting notification flags');
+      console.log(`[${getTimestamp()}] New day detected, resetting notification flags`);
       gameStartNotificationSent = false;
       currentGamePk = null;
       currentGameInfo = null;
@@ -859,24 +871,24 @@ async function pollLoop() {
     lastCheckedDate = today;
     
     if (!currentGamePk) {
-      console.log('No current gamePk, searching for today\'s Mariners game...');
+      console.log(`[${getTimestamp()}] No current gamePk, searching for today's Mariners game...`);
       currentGamePk = await findTodayMarinersGamePk();
       if (!currentGamePk) {
-        console.log('No active Mariners game found today');
+        console.log(`[${getTimestamp()}] No active Mariners game found today`);
         // Check if there's a future game to wait for
         const nextGameTime = await findNextMarinersGame();
         if (nextGameTime) {
           const timeUntilGame = nextGameTime.getTime() - Date.now();
           const hoursUntil = Math.round(timeUntilGame / (1000 * 60 * 60));
-          console.log(`Next Mariners game in ${hoursUntil} hours. Checking again in 4 hours.`);
+          console.log(`[${getTimestamp()}] Next Mariners game in ${hoursUntil} hours. Checking again in 4 hours.`);
           nextPollTime = new Date(Date.now() + (4 * 60 * 60 * 1000)); // Check every 4 hours
         } else {
-          console.log('No upcoming Mariners games found; will retry in 30 minutes');
+          console.log(`[${getTimestamp()}] No upcoming Mariners games found; will retry in 30 minutes`);
           nextPollTime = new Date(Date.now() + (30 * 60 * 1000));
         }
         return;
       }
-      console.log('Found and now tracking gamePk:', currentGamePk);
+      console.log(`[${getTimestamp()}] Found and now tracking gamePk:`, currentGamePk);
       
       // Get game info for polling calculations
       const scheduleUrl = `https://statsapi.mlb.com/api/v1/schedule?date=${getTodayDateString()}&teamId=${MARINERS_TEAM_ID}&sportId=1`;
@@ -897,17 +909,30 @@ async function pollLoop() {
       await checkIfCalIsUpToBat(currentGamePk);
     }
     
-    console.log('Polling for Cal dingers in gamePk:', currentGamePk);
+    console.log(`[${getTimestamp()}] Polling for Cal dingers in gamePk:`, currentGamePk);
     await checkForCalDingers(currentGamePk);
     
     // Set next poll time based on current game state
     setNextPollTime();
     
+    // If no next poll time was set (game finished), reset and search for next game
+    if (!nextPollTime && currentGameInfo?.status?.detailedState && 
+        (currentGameInfo.status.detailedState === 'Final' || 
+         currentGameInfo.status.detailedState === 'Game Over' || 
+         currentGameInfo.status.detailedState === 'Completed Early')) {
+      console.log(`[${getTimestamp()}] Resetting game tracking to search for next game`);
+      currentGamePk = null;
+      currentGameInfo = null;
+      calIsUpToBat = false;
+      // Set a short poll time to immediately search for next game
+      nextPollTime = new Date(Date.now() + 5000); // 5 seconds
+    }
+    
     // Schedule next poll based on nextPollTime
     scheduleNextPoll();
     
   } catch (err) {
-    console.error('Poll loop error:', err?.message || err);
+    console.error(`[${getTimestamp()}] Poll loop error:`, err?.message || err);
     // Reset currentGamePk on error to retry finding a game
     currentGamePk = null;
     currentGameInfo = null;
@@ -933,13 +958,13 @@ function scheduleNextPoll(overrideDelay = null) {
     delay = 5000; // Default 5 seconds if no nextPollTime set
   }
   
-  console.log(`Next poll scheduled in ${Math.round(delay / 1000)} seconds`);
+  console.log(`[${getTimestamp()}] Next poll scheduled in ${Math.round(delay / 1000)} seconds`);
   pollTimer = setTimeout(pollLoop, delay);
 }
 
 function startPolling() {
   if (pollTimer) return;
-  console.log('Starting dynamic polling system...');
+  console.log(`[${getTimestamp()}] Starting dynamic polling system...`);
   // Kick off immediately
   pollLoop();
 }
@@ -971,20 +996,20 @@ app.get('/test-mlb-api', async (req, res) => {
     // Test 1: Get today's Mariners schedule
     const date = getTodayDateString();
     const scheduleUrl = `https://statsapi.mlb.com/api/v1/schedule?date=${date}&teamId=${MARINERS_TEAM_ID}&sportId=1`;
-    console.log('Testing schedule URL:', scheduleUrl);
+    console.log(`[${getTimestamp()}] Testing schedule URL:`, scheduleUrl);
     
     // Test with today's actual date first
     const today = new Date();
     const todayString = today.toISOString().split('T')[0];
-    console.log('Today\'s date:', todayString);
+    console.log(`[${getTimestamp()}] Today's date:`, todayString);
     
     let scheduleData;
     try {
       scheduleData = await fetchJson(scheduleUrl);
     } catch (error) {
-      console.log('Failed with calculated date, trying today\'s actual date...');
+      console.log(`[${getTimestamp()}] Failed with calculated date, trying today's actual date...`);
       const todayUrl = `https://statsapi.mlb.com/api/v1/schedule?date=${todayString}&teamId=${MARINERS_TEAM_ID}&sportId=1`;
-      console.log('Trying today URL:', todayUrl);
+      console.log(`[${getTimestamp()}] Trying today URL:`, todayUrl);
       scheduleData = await fetchJson(todayUrl);
     }
     
@@ -996,10 +1021,10 @@ app.get('/test-mlb-api', async (req, res) => {
       const games = scheduleData.dates[0]?.games || [];
       if (games.length > 0) {
         gamePk = games[0].gamePk;
-        console.log('Found gamePk:', gamePk);
+        console.log(`[${getTimestamp()}] Found gamePk:`, gamePk);
         
         const liveFeedUrl = `https://statsapi.mlb.com/api/v1.1/game/${gamePk}/feed/live`;
-        console.log('Testing live feed URL:', liveFeedUrl);
+        console.log(`[${getTimestamp()}] Testing live feed URL:`, liveFeedUrl);
         liveFeedData = await fetchJson(liveFeedUrl);
       }
     }
@@ -1017,7 +1042,7 @@ app.get('/test-mlb-api', async (req, res) => {
       message: 'MLB API test completed!'
     });
   } catch (e) {
-    console.error('MLB API test error:', e);
+    console.error(`[${getTimestamp()}] MLB API test error:`, e);
     res.status(500).json({ 
       ok: false, 
       error: e?.message || String(e),
@@ -1038,7 +1063,7 @@ app.get('/cal-stats', async (req, res) => {
       stats: stats
     });
   } catch (e) {
-    console.error('Cal stats error:', e);
+    console.error(`[${getTimestamp()}] Cal stats error:`, e);
     res.status(500).json({ 
       ok: false, 
       error: e?.message || String(e)
@@ -1047,9 +1072,9 @@ app.get('/cal-stats', async (req, res) => {
 });
 
 app.get('/whatsapp-qr', (req, res) => {
-  console.log('WhatsApp QR endpoint accessed');
-  console.log('Current QR code available:', !!currentQRCode);
-  console.log('WhatsApp ready:', whatsappReady);
+  console.log(`[${getTimestamp()}] WhatsApp QR endpoint accessed`);
+  console.log(`[${getTimestamp()}] Current QR code available:`, !!currentQRCode);
+  console.log(`[${getTimestamp()}] WhatsApp ready:`, whatsappReady);
   
   if (!currentQRCode) {
     return res.json({
@@ -1071,7 +1096,7 @@ app.get('/whatsapp-qr', (req, res) => {
 
 app.post('/health-status', express.json(), async (req, res) => {
   try {
-    console.log('Health status endpoint accessed');
+    console.log(`[${getTimestamp()}] Health status endpoint accessed`);
     
     // Get current status information
     const now = new Date();
@@ -1111,7 +1136,7 @@ app.post('/health-status', express.json(), async (req, res) => {
     });
     
   } catch (error) {
-    console.error('Error sending health status:', error.message);
+    console.error(`[${getTimestamp()}] Error sending health status:`, error.message);
     res.status(500).json({
       ok: false,
       error: error.message,
@@ -1122,18 +1147,18 @@ app.post('/health-status', express.json(), async (req, res) => {
 
 // Start the server immediately, then initialize WhatsApp
 app.listen(PORT, () => {
-  console.log(`Server listening on :${PORT}`);
-  console.log('Express server is ready - health checks should pass now');
+  console.log(`[${getTimestamp()}] Server listening on :${PORT}`);
+  console.log(`[${getTimestamp()}] Express server is ready - health checks should pass now`);
   
   // Initialize WhatsApp after server is ready
   setTimeout(() => {
-    console.log('Starting WhatsApp initialization...');
+    console.log(`[${getTimestamp()}] Starting WhatsApp initialization...`);
     whatsappClient.initialize();
   }, 2000);
   
   // Start polling after a delay to ensure everything is ready
   setTimeout(() => {
-    console.log('Starting polling loop...');
+    console.log(`[${getTimestamp()}] Starting polling loop...`);
     startPolling();
   }, 5000);
 });
