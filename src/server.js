@@ -8,6 +8,7 @@ const QRCode = require('qrcode');
 // --- Config (env) ---
 const PORT = process.env.PORT || 3000;
 const RECIPIENT_NUMBERS = (process.env.RECIPIENT_NUMBERS || '').split(',').map(s => s.trim()).filter(Boolean);
+const GROUP_CHAT_ID = process.env.GROUP_CHAT_ID || ''; // WhatsApp group chat ID
 
 // Real MLB IDs
 const CAL_RALEIGH_PLAYER_ID = process.env.CAL_RALEIGH_PLAYER_ID || '663728';
@@ -16,6 +17,9 @@ const CURRENT_SEASON = new Date().getFullYear();
 
 // Polling interval in ms
 const POLL_INTERVAL_MS = Number(process.env.POLL_INTERVAL_MS || 15000);
+
+// Enhanced plate appearance notifications flag
+const ENHANCED_PA = process.env.ENHANCED_PA === 'true' || process.env.ENHANCED_PA === '1';
 
 // Home run wager data
 const WAGER_DATA = {
@@ -27,12 +31,13 @@ const WAGER_DATA = {
 // Log configuration on startup
 console.log('=== CAL DINGER BOT STARTUP ===');
 console.log('Port:', PORT);
-console.log('Recipient Numbers:', RECIPIENT_NUMBERS);
-console.log('Number of recipients:', RECIPIENT_NUMBERS.length);
+console.log('Recipient Numbers:', RECIPIENT_NUMBERS.length > 0 ? RECIPIENT_NUMBERS : 'Not configured');
+console.log('Group Chat ID:', GROUP_CHAT_ID || 'Not configured');
 console.log('Cal Raleigh Player ID:', CAL_RALEIGH_PLAYER_ID);
 console.log('Mariners Team ID:', MARINERS_TEAM_ID);
 console.log('Current Season:', CURRENT_SEASON);
 console.log('Poll Interval (ms):', POLL_INTERVAL_MS);
+console.log('Enhanced PA Notifications:', ENHANCED_PA ? 'Enabled' : 'Disabled (home runs only)');
 console.log('================================');
 
 // Initialize WhatsApp client
@@ -52,6 +57,100 @@ let lastCheckedDate = null;
 let currentGameInfo = null;
 let calIsUpToBat = false;
 let nextPollTime = null;
+
+// Data cache to reduce redundant API calls
+const cache = {
+  calStats: { data: null, timestamp: 0, ttl: 60000 }, // 1 minute
+  liveFeed: { data: null, gamePk: null, timestamp: 0, ttl: 10000 }, // 10 seconds
+  dateString: { data: null, timestamp: 0, ttl: 3600000 } // 1 hour
+};
+
+// Helper function for consistent notification handling
+async function sendNotificationIfEnabled(message, notificationType) {
+  const shouldSend = ENHANCED_PA || notificationType === 'dinger' || notificationType === 'initialization';
+  
+  if (shouldSend) {
+    await sendWhatsApp(message);
+    console.log(`${notificationType} notification sent`);
+  } else {
+    console.log(`${notificationType} notification skipped (ENHANCED_PA disabled)`);
+  }
+}
+
+// Cached date string function
+function getTodayDateString() {
+  const now = Date.now();
+  if (!cache.dateString.data || (now - cache.dateString.timestamp) > cache.dateString.ttl) {
+    const pacificTime = new Date(new Date().toLocaleString("en-US", {timeZone: "America/Los_Angeles"}));
+    const y = pacificTime.getFullYear();
+    const m = String(pacificTime.getMonth() + 1).padStart(2, '0');
+    const d = String(pacificTime.getDate()).padStart(2, '0');
+    cache.dateString.data = `${y}-${m}-${d}`;
+    cache.dateString.timestamp = now;
+  }
+  return cache.dateString.data;
+}
+
+// Cached Cal stats function
+async function fetchCalSeasonStats() {
+  const now = Date.now();
+  if (cache.calStats.data && (now - cache.calStats.timestamp) < cache.calStats.ttl) {
+    return cache.calStats.data;
+  }
+
+  try {
+    const url = `https://statsapi.mlb.com/api/v1/people/${CAL_RALEIGH_PLAYER_ID}/stats?stats=season&season=${CURRENT_SEASON}&sportId=1`;
+    const response = await fetchJson(url);
+    
+    if (!response?.stats?.[0]?.splits?.[0]?.stat) {
+      throw new Error('No season stats found');
+    }
+    
+    const stats = response.stats[0].splits[0].stat;
+    const result = {
+      homeRuns: stats.homeRuns || 0,
+      rbi: stats.rbi || 0,
+      avg: stats.avg || '.000',
+      ops: stats.ops || '.000',
+      gamesPlayed: stats.gamesPlayed || 0
+    };
+    
+    cache.calStats.data = result;
+    cache.calStats.timestamp = now;
+    return result;
+  } catch (error) {
+    console.error('Error fetching Cal season stats:', error.message);
+    return cache.calStats.data; // Return cached data if available
+  }
+}
+
+// Cached live feed function
+async function fetchLiveFeed(gamePk) {
+  const now = Date.now();
+  if (cache.liveFeed.data && 
+      cache.liveFeed.gamePk === gamePk && 
+      (now - cache.liveFeed.timestamp) < cache.liveFeed.ttl) {
+    return cache.liveFeed.data;
+  }
+
+  try {
+    const url = `https://statsapi.mlb.com/api/v1/game/${gamePk}/feed/live`;
+    const response = await fetchJson(url);
+    
+    cache.liveFeed.data = response;
+    cache.liveFeed.gamePk = gamePk;
+    cache.liveFeed.timestamp = now;
+    return response;
+  } catch (error) {
+    if (error.message.includes('404')) {
+      console.log('Live feed not available (game likely finished or not started)');
+      // Clear game tracking if it's a 404 - game is probably finished
+      return null;
+    }
+    console.error('Error fetching live feed:', error.message);
+    return cache.liveFeed.data; // Return cached data if available
+  }
+}
 
 // WhatsApp event handlers
 whatsappClient.on('qr', (qr) => {
@@ -109,9 +208,8 @@ async function checkAndSendInitialConfirmation() {
     if (whatsappReady && calStats) {
       const message = `🚨🚨🚨 CAL DINGER BOT IS READY! 🚨🚨🚨\n\n⚾ WhatsApp: ✅ Connected\n📊 MLB API: ✅ Responding\n🏟️ Cal's ${CURRENT_SEASON} Stats:\n   • HR: ${calStats.homeRuns}\n   • RBI: ${calStats.rbi}\n   • AVG: ${calStats.avg}\n   • OPS: ${calStats.ops}\n\n🔍 Monitoring for Cal dingers... ⚾💥${formatWagerSection(calStats.homeRuns, calStats)}`;
       
-      await sendWhatsApp(message);
+      await sendNotificationIfEnabled(message, 'initialization');
       initialConfirmationSent = true;
-      console.log('Initial confirmation message sent!');
     } else {
       console.log('Not ready for initial confirmation yet:', {
         whatsappReady,
@@ -158,9 +256,8 @@ async function checkAndSendGameStartNotification(gamePk) {
       
       const message = `⚾🚨 MARINERS GAME STARTED! 🚨⚾\n\n🏟️ ${awayTeam} @ ${homeTeam}\n📍 ${venue}\n🕐 ${gameTime} PT\n\n🏆 Cal's ${CURRENT_SEASON} Stats:\n   • HR: ${calStats.homeRuns}\n   • RBI: ${calStats.rbi}\n   • AVG: ${calStats.avg}\n   • OPS: ${calStats.ops}\n\n🔍 Monitoring for Cal dingers... ⚾💥${formatWagerSection(calStats.homeRuns, calStats)}`;
       
-      await sendWhatsApp(message);
+      await sendNotificationIfEnabled(message, 'gamestart');
       gameStartNotificationSent = true;
-      console.log('Game start notification sent!');
     } else {
       console.log('Game not in progress yet:', gameInfo?.status?.detailedState);
     }
@@ -169,48 +266,53 @@ async function checkAndSendGameStartNotification(gamePk) {
   }
 }
 
-function calculateNextPollTime(gameInfo) {
-  if (!gameInfo) return null;
-  
-  const now = new Date();
-  const gameTime = new Date(gameInfo.gameDate);
-  const thirtyMinutesBeforeGame = new Date(gameTime.getTime() - (30 * 60 * 1000));
-  
-  // If we're more than 30 minutes before game, wait until 30 minutes before
-  if (now < thirtyMinutesBeforeGame) {
-    return thirtyMinutesBeforeGame;
-  }
-  
-  // If game is in progress, poll every 10 seconds
-  if (gameInfo.status?.detailedState === 'In Progress') {
-    return new Date(now.getTime() + (10 * 1000));
-  }
-  
-  // If game hasn't started yet, poll every 5 minutes
-  return new Date(now.getTime() + (5 * 60 * 1000));
-}
+// Polling intervals in milliseconds
+const POLL_INTERVALS = {
+  CAL_BATTING: 10 * 1000,     // 10 seconds when Cal is up
+  GAME_ACTIVE: 30 * 1000,     // 30 seconds during game
+  GAME_PREGAME: 5 * 60 * 1000, // 5 minutes before game starts
+  GAME_DISTANT: null          // Calculate based on game time
+};
 
 function shouldPollNow() {
-  if (!nextPollTime) return true;
-  return new Date() >= nextPollTime;
+  return !nextPollTime || new Date() >= nextPollTime;
 }
 
-function updatePollInterval() {
+function setNextPollTime() {
+  const now = Date.now();
+  
   if (calIsUpToBat) {
-    // Cal is up to bat - poll every second
-    nextPollTime = new Date(Date.now() + 1000);
-    console.log('Cal is up to bat - switching to 1-second polling');
-  } else if (currentGameInfo && currentGameInfo.status?.detailedState === 'In Progress') {
-    // Game in progress - poll every 10 seconds
-    nextPollTime = new Date(Date.now() + (10 * 1000));
-    console.log('Game in progress - polling every 10 seconds');
-  } else if (currentGameInfo) {
-    // Game scheduled - use calculated time
-    nextPollTime = calculateNextPollTime(currentGameInfo);
-    if (nextPollTime) {
-      const timeUntilNextPoll = Math.round((nextPollTime - new Date()) / 1000 / 60);
-      console.log(`Next poll in ${timeUntilNextPoll} minutes`);
-    }
+    nextPollTime = new Date(now + POLL_INTERVALS.CAL_BATTING);
+    console.log('Cal is up to bat - switching to 10-second polling');
+    return;
+  }
+  
+  if (!currentGameInfo) {
+    console.log('No game info available');
+    return;
+  }
+  
+  const gameStatus = currentGameInfo.status?.detailedState;
+  
+  if (gameStatus === 'In Progress') {
+    nextPollTime = new Date(now + POLL_INTERVALS.GAME_ACTIVE);
+    console.log('Game in progress - polling every 30 seconds');
+    return;
+  }
+  
+  // Handle pre-game timing
+  const gameTime = new Date(currentGameInfo.gameDate);
+  const thirtyMinutesBeforeGame = gameTime.getTime() - (30 * 60 * 1000);
+  
+  if (now < thirtyMinutesBeforeGame) {
+    // Wait until 30 minutes before game
+    nextPollTime = new Date(thirtyMinutesBeforeGame);
+    const minutesUntil = Math.round((thirtyMinutesBeforeGame - now) / 60000);
+    console.log(`Waiting ${minutesUntil} minutes until 30min before game`);
+  } else {
+    // Within 30 minutes of game start - poll every 5 minutes
+    nextPollTime = new Date(now + POLL_INTERVALS.GAME_PREGAME);
+    console.log('Pre-game polling - every 5 minutes');
   }
 }
 
@@ -227,23 +329,25 @@ async function checkIfCalIsUpToBat(gamePk) {
       if (!calIsUpToBat) {
         console.log('🚨 CAL IS UP TO BAT! 🚨');
         calIsUpToBat = true;
-        updatePollInterval();
+        setNextPollTime();
         
         // Send notification that Cal is up to bat
         const message = `⚾🚨 CAL IS UP TO BAT! 🚨⚾\n\n🏟️ ${getGameInfoString()}\n\n🔍 Monitoring for dinger... ⚾💥`;
-        await sendWhatsApp(message);
+        await sendNotificationIfEnabled(message, 'upbat');
       }
       return true;
     }
     
     // Check if Cal just finished his at-bat
     if (calIsUpToBat) {
-      console.log('Cal finished his at-bat, switching back to 10-second polling');
+      console.log('Cal finished his at-bat, switching back to 30-second polling');
       calIsUpToBat = false;
-      updatePollInterval();
+      setNextPollTime();
       
       // Send notification with at-bat result
-      await sendCalAtBatResult(gamePk);
+      if (ENHANCED_PA) {
+        await sendCalAtBatResult(gamePk);
+      }
     }
     
     return false;
@@ -317,23 +421,13 @@ async function sendCalAtBatResult(gamePk) {
     
     const message = `${resultEmoji} CAL'S AT-BAT RESULT: ${resultType} ${resultEmoji}\n\n🏟️ ${getGameInfoString()}\n📝 ${description}\n${rbi > 0 ? `🏃‍♂️ ${rbi} RBI\n` : ''}${runs > 0 ? `🏃‍♂️ ${runs} Run(s)\n` : ''}⚾ Inning: ${inningHalf} ${inning}`;
     
-    await sendWhatsApp(message);
-    console.log('Cal at-bat result notification sent:', description);
+    await sendNotificationIfEnabled(message, 'atbat');
     
   } catch (error) {
     console.error('Error sending Cal at-bat result:', error.message);
   }
 }
 
-function getTodayDateString() {
-  const now = new Date();
-  // Use Pacific Time for MLB games (Mariners are in Seattle)
-  const pacificTime = new Date(now.toLocaleString("en-US", {timeZone: "America/Los_Angeles"}));
-  const y = pacificTime.getFullYear();
-  const m = String(pacificTime.getMonth() + 1).padStart(2, '0');
-  const d = String(pacificTime.getDate()).padStart(2, '0');
-  return `${y}-${m}-${d}`;
-}
 
 async function fetchJson(url) {
   const res = await fetch(url);
@@ -375,9 +469,16 @@ async function findTodayMarinersGamePk() {
     const dates = data?.dates || [];
     for (const day of dates) {
       for (const game of (day?.games || [])) {
-        // Return the first gamePk; could enhance for doubleheaders later
-        console.log('Found game:', game.gamePk, game.status?.detailedState);
-        return game.gamePk;
+        const status = game.status?.detailedState;
+        console.log('Found game:', game.gamePk, status);
+        
+        // Only return games that are not finished
+        if (status !== 'Final' && status !== 'Completed Early' && status !== 'Cancelled' && status !== 'Postponed') {
+          console.log('Tracking active/scheduled game:', game.gamePk);
+          return game.gamePk;
+        } else {
+          console.log('Skipping finished game:', game.gamePk, status);
+        }
       }
     }
     console.log('No games found for date:', date);
@@ -388,60 +489,52 @@ async function findTodayMarinersGamePk() {
   }
 }
 
-async function fetchLiveFeed(gamePk) {
-  if (!gamePk) {
-    throw new Error('gamePk is required to fetch live feed');
-  }
-  const url = `https://statsapi.mlb.com/api/v1.1/game/${gamePk}/feed/live`;
-  console.log('Fetching live feed from:', url);
-  return fetchJson(url);
-}
 
-async function fetchCalSeasonStats() {
-  try {
-    const url = `https://statsapi.mlb.com/api/v1/people/${CAL_RALEIGH_PLAYER_ID}/stats?stats=season&season=${CURRENT_SEASON}&group=hitting`;
-    console.log('Fetching Cal\'s season stats from:', url);
-    const data = await fetchJson(url);
-    
-    const stats = data?.stats?.[0]?.splits?.[0]?.stat;
-    if (stats) {
-      return {
-        homeRuns: stats.homeRuns || 0,
-        rbi: stats.rbi || 0,
-        avg: stats.avg || 0,
-        ops: stats.ops || 0,
-        gamesPlayed: stats.gamesPlayed || 0
-      };
-    }
-    return { homeRuns: 0, rbi: 0, avg: 0, ops: 0, gamesPlayed: 0 };
-  } catch (error) {
-    console.error('Error fetching Cal\'s season stats:', error.message);
-    return { homeRuns: 0, rbi: 0, avg: 0, ops: 0, gamesPlayed: 0 };
-  }
-}
 
 async function sendWhatsApp(message) {
   if (!whatsappReady) {
     console.log('WhatsApp not ready; skipping message:', message);
     return;
   }
-  if (RECIPIENT_NUMBERS.length === 0) {
-    console.log('No recipients configured; skipping WhatsApp message');
+  if (!GROUP_CHAT_ID && RECIPIENT_NUMBERS.length === 0) {
+    console.log('No group chat ID or recipient numbers configured; skipping WhatsApp message');
     return;
   }
   
-  for (const number of RECIPIENT_NUMBERS) {
-    try {
-      // Format number for WhatsApp (remove + and add country code if needed)
-      const formattedNumber = number.replace('+', '');
-      const chatId = `${formattedNumber}@c.us`;
-      
-      await whatsappClient.sendMessage(chatId, message);
-      console.log(`WhatsApp message sent to ${number}`);
-    } catch (error) {
-      console.error(`Failed to send WhatsApp to ${number}:`, error.message);
+  let successCount = 0;
+  let totalTargets = 0;
+  
+  // Send to individual recipient numbers if configured
+  if (RECIPIENT_NUMBERS.length > 0) {
+    totalTargets += RECIPIENT_NUMBERS.length;
+    for (const number of RECIPIENT_NUMBERS) {
+      try {
+        // Format number for WhatsApp (remove + and add country code if needed)
+        const formattedNumber = number.replace('+', '');
+        const chatId = `${formattedNumber}@c.us`;
+        
+        await whatsappClient.sendMessage(chatId, message);
+        console.log(`WhatsApp message sent to ${number}`);
+        successCount++;
+      } catch (error) {
+        console.error(`Failed to send WhatsApp to ${number}:`, error.message);
+      }
     }
   }
+  
+  // Send to group chat if configured
+  if (GROUP_CHAT_ID) {
+    totalTargets += 1;
+    try {
+      await whatsappClient.sendMessage(GROUP_CHAT_ID, message);
+      console.log(`WhatsApp message sent to group chat: ${GROUP_CHAT_ID}`);
+      successCount++;
+    } catch (error) {
+      console.error(`Failed to send WhatsApp to group ${GROUP_CHAT_ID}:`, error.message);
+    }
+  }
+  
+  console.log(`WhatsApp delivery: ${successCount}/${totalTargets} successful`);
 }
 
 function calculateSeasonProjection(currentHRs, seasonStats = null) {
@@ -547,9 +640,9 @@ function formatWagerSection(currentHRs, seasonStats = null) {
   const projectedHRs = calculateSeasonProjection(currentHRs, seasonStats);
   const probabilities = calculateWagerProbabilities(currentHRs, projectedHRs, seasonStats);
   
-  let wagerText = `\n\n🎯 WAGER UPDATE 🎯\n`;
-  wagerText += `📊 Current: ${currentHRs} HR\n`;
-  wagerText += `📈 Linear Projection: ${projectedHRs} HR\n\n`;
+  let wagerText = `\n\n🎯 WAGER UPDATE\n`;
+  wagerText += `Current: ${currentHRs} HR\n`;
+  wagerText += `Projected: ${projectedHRs} HR\n\n`;
   
   // Separate players from "No Winner" and sort by probability (highest first)
   const playerResults = Object.entries(probabilities)
@@ -562,9 +655,10 @@ function formatWagerSection(currentHRs, seasonStats = null) {
     const emoji = index === 0 ? '🥇' : index === 1 ? '🥈' : '🥉';
     const percentStr = (data.probability * 100).toFixed(0);
     const numbersStr = data.numbers.join(',');
-    const indicator = data.inRange ? '🎯' : '';
+    const indicator = data.inRange ? ' 🎯' : '';
     
-    wagerText += `${emoji} ${person}: ${percentStr}% (${numbersStr}) ${indicator}\n`;
+    wagerText += `${emoji} ${person}: ${percentStr}%${indicator}\n`;
+    wagerText += `   (${numbersStr})\n`;
   });
   
   // Add "No Winner" at the end
@@ -576,7 +670,7 @@ function formatWagerSection(currentHRs, seasonStats = null) {
   return wagerText;
 }
 
-function formatHrMessage(play, seasonStats = null) {
+function formatHrMessage(play, seasonStats = null, gameFeed = null) {
   const inningHalf = play?.about?.isTopInning ? 'Top' : 'Bottom';
   const inning = play?.about?.inning;
   const distance = play?.hitData?.totalDistance || play?.hitData?.totalDistance?.toString?.();
@@ -589,20 +683,66 @@ function formatHrMessage(play, seasonStats = null) {
   const currentSeasonHRs = seasonStats?.homeRuns || 0;
   const newSeasonTotal = currentSeasonHRs + 1;
   
-  const bits = [
-    `🚨🚨🚨 CAL DINGER! 🚨🚨🚨 ${desc} ⚾💥`,
-    inning ? `${inningHalf} ${inning} ⚾` : undefined,
-    rbis != null ? `${rbis} RBI 🏃‍♂️` : undefined,
-    exitVelo ? `EV ${exitVelo} mph 💨` : undefined,
-    launchAngle ? `LA ${launchAngle}° 📐` : undefined,
-    distance ? `${distance} ft 🚀` : undefined,
-    `Season HR #${newSeasonTotal} 🏆`,
-  ].filter(Boolean);
+  // Extract current game score and Cal's stats
+  let gameInfoText = '';
+  if (gameFeed?.liveData?.boxscore?.teams) {
+    const boxscore = gameFeed.liveData.boxscore.teams;
+    const awayTeam = boxscore.away;
+    const homeTeam = boxscore.home;
+    
+    // Determine which team is Mariners and get score
+    const marinersData = awayTeam?.team?.id === 136 ? awayTeam : homeTeam;
+    const opponentData = awayTeam?.team?.id === 136 ? homeTeam : awayTeam;
+    const marinersAway = awayTeam?.team?.id === 136;
+    
+    if (marinersData && opponentData) {
+      const marinersScore = marinersData.teamStats?.batting?.runs || 0;
+      const opponentScore = opponentData.teamStats?.batting?.runs || 0;
+      const opponentName = opponentData.team?.abbreviation || 'OPP';
+      
+      // Format score for mobile
+      if (marinersAway) {
+        gameInfoText = `\n\n📊 SEA ${marinersScore} - ${opponentName} ${opponentScore}`;
+      } else {
+        gameInfoText = `\n\n📊 ${opponentName} ${opponentScore} - SEA ${marinersScore}`;
+      }
+      
+      // Extract Cal's game stats
+      if (marinersData?.players) {
+        const calPlayerKey = Object.keys(marinersData.players).find(key => 
+          marinersData.players[key].person.id === parseInt(CAL_RALEIGH_PLAYER_ID)
+        );
+        
+        if (calPlayerKey) {
+          const calGameStats = marinersData.players[calPlayerKey].stats?.batting;
+          if (calGameStats) {
+            const gameHits = calGameStats.hits || 0;
+            const gameAB = calGameStats.atBats || 0;
+            const gameRBI = calGameStats.rbi || 0;
+            const gameRuns = calGameStats.runs || 0;
+            
+            gameInfoText += `\n🏟️ Cal: ${gameHits}/${gameAB}`;
+            if (gameRBI > 0) gameInfoText += ` • ${gameRBI} RBI`;
+            if (gameRuns > 0) gameInfoText += ` • ${gameRuns} R`;
+          }
+        }
+      }
+    }
+  }
   
-  const mainMessage = bits.join(' • ');
+  // Format for mobile WhatsApp - use line breaks instead of bullets
+  let mainMessage = `🚨🚨🚨 CAL DINGER! 🚨🚨🚨\n${desc} ⚾💥`;
+  
+  // Add home run details on separate lines
+  if (inning) mainMessage += `\n${inningHalf} ${inning}`;
+  if (rbis != null) mainMessage += ` • ${rbis} RBI 🏃‍♂️`;
+  if (exitVelo) mainMessage += `\nEV ${exitVelo} mph`;
+  if (launchAngle) mainMessage += ` • LA ${launchAngle}°`;
+  if (distance) mainMessage += ` • ${distance} ft 🚀`;
+  mainMessage += `\n\n🏆 Season HR #${newSeasonTotal}`;
   const wagerSection = formatWagerSection(newSeasonTotal, seasonStats);
   
-  return mainMessage + wagerSection;
+  return mainMessage + gameInfoText + wagerSection;
 }
 
 async function checkForCalDingers(gamePk) {
@@ -636,7 +776,7 @@ async function checkForCalDingers(gamePk) {
       // Send the special dinger message for home runs
       const seasonStats = await fetchCalSeasonStats();
       console.log('Cal\'s current season stats:', seasonStats);
-      const msg = formatHrMessage(play, seasonStats);
+      const msg = formatHrMessage(play, seasonStats, feed);
       console.log('Detected HR by Cal Raleigh:', msg);
       await sendWhatsApp(msg);
       if (eventId) notifiedEventIds.add(eventId);
@@ -690,7 +830,6 @@ async function pollLoop() {
       if (scheduleData?.dates && scheduleData.dates.length > 0) {
         const games = scheduleData.dates[0]?.games || [];
         currentGameInfo = games.find(game => game.gamePk === currentGamePk);
-        updatePollInterval();
       }
     }
     
@@ -707,8 +846,8 @@ async function pollLoop() {
     console.log('Polling for Cal dingers in gamePk:', currentGamePk);
     await checkForCalDingers(currentGamePk);
     
-    // Update polling interval for next cycle
-    updatePollInterval();
+    // Set next poll time based on current game state
+    setNextPollTime();
     
     // Schedule next poll based on nextPollTime
     scheduleNextPoll();
@@ -897,7 +1036,8 @@ app.post('/health-status', express.json(), async (req, res) => {
       `   • AVG: ${calStats.avg}\n` +
       `   • OPS: ${calStats.ops}\n\n` +
       `🔧 Bot Status: ✅ Healthy and Monitoring\n` +
-      `📊 Recipients: ${RECIPIENT_NUMBERS.length} number(s) configured`;
+      `📊 Recipients: ${RECIPIENT_NUMBERS.length} number(s) configured\n` +
+      `📊 Group Chat: ${GROUP_CHAT_ID ? '✅ Configured' : '❌ Not configured'}`;
     
     // Send the health status message
     await sendWhatsApp(statusMessage);
@@ -911,7 +1051,8 @@ app.post('/health-status', express.json(), async (req, res) => {
         currentGamePk,
         gameStatus: currentGameInfo?.status?.detailedState,
         calIsUpToBat,
-        recipientCount: RECIPIENT_NUMBERS.length
+        recipientCount: RECIPIENT_NUMBERS.length,
+        groupChatConfigured: !!GROUP_CHAT_ID
       }
     });
     
