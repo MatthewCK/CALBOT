@@ -489,6 +489,51 @@ async function findTodayMarinersGamePk() {
   }
 }
 
+async function findNextMarinersGame() {
+  try {
+    // Check next 7 days for upcoming games
+    const today = getTodayDateString(); // Use same date logic as rest of app
+    console.log('Today is:', today);
+    
+    for (let i = 1; i <= 7; i++) {
+      // Calculate next date using Pacific Time like the rest of the app
+      const checkDate = new Date(new Date().toLocaleString("en-US", {timeZone: "America/Los_Angeles"}));
+      checkDate.setDate(checkDate.getDate() + i);
+      
+      const y = checkDate.getFullYear();
+      const m = String(checkDate.getMonth() + 1).padStart(2, '0');
+      const d = String(checkDate.getDate()).padStart(2, '0');
+      const dateString = `${y}-${m}-${d}`;
+      
+      console.log(`Checking for games on: ${dateString} (${i} days from today)`);
+      
+      const url = `https://statsapi.mlb.com/api/v1/schedule?date=${dateString}&teamId=${MARINERS_TEAM_ID}&sportId=1`;
+      
+      const data = await fetchJson(url);
+      const dates = data?.dates || [];
+      
+      console.log(`Schedule data for ${dateString}:`, JSON.stringify(data, null, 2));
+      
+      for (const day of dates) {
+        for (const game of (day?.games || [])) {
+          const status = game.status?.detailedState;
+          console.log(`Found game on ${dateString}: ${game.gamePk} - ${status}`);
+          
+          if (status !== 'Final' && status !== 'Completed Early' && status !== 'Cancelled' && status !== 'Postponed') {
+            console.log(`Next Mariners game found: ${dateString} at ${game.gameDate}`);
+            return new Date(game.gameDate);
+          }
+        }
+      }
+    }
+    console.log('No upcoming Mariners games found in next 7 days');
+    return null;
+  } catch (error) {
+    console.error('Error finding next Mariners game:', error.message);
+    return null;
+  }
+}
+
 
 
 async function sendWhatsApp(message) {
@@ -817,9 +862,18 @@ async function pollLoop() {
       console.log('No current gamePk, searching for today\'s Mariners game...');
       currentGamePk = await findTodayMarinersGamePk();
       if (!currentGamePk) {
-        console.log('No Mariners game found today; will retry in next poll cycle');
-        // Wait 30 minutes before checking again
-        nextPollTime = new Date(Date.now() + (30 * 60 * 1000));
+        console.log('No active Mariners game found today');
+        // Check if there's a future game to wait for
+        const nextGameTime = await findNextMarinersGame();
+        if (nextGameTime) {
+          const timeUntilGame = nextGameTime.getTime() - Date.now();
+          const hoursUntil = Math.round(timeUntilGame / (1000 * 60 * 60));
+          console.log(`Next Mariners game in ${hoursUntil} hours. Checking again in 4 hours.`);
+          nextPollTime = new Date(Date.now() + (4 * 60 * 60 * 1000)); // Check every 4 hours
+        } else {
+          console.log('No upcoming Mariners games found; will retry in 30 minutes');
+          nextPollTime = new Date(Date.now() + (30 * 60 * 1000));
+        }
         return;
       }
       console.log('Found and now tracking gamePk:', currentGamePk);
