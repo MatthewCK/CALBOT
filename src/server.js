@@ -275,7 +275,7 @@ async function checkAndSendGameStartNotification(gamePk) {
 const POLL_INTERVALS = {
   CAL_BATTING: 10 * 1000,     // 10 seconds when Cal is up
   GAME_ACTIVE: 30 * 1000,     // 30 seconds during game
-  GAME_PREGAME: 5 * 60 * 1000, // 5 minutes before game starts
+  GAME_PREGAME: 10 * 1000,    // 10 seconds before game starts
   GAME_DISTANT: null          // Calculate based on game time
 };
 
@@ -314,17 +314,17 @@ function setNextPollTime() {
   
   // Handle pre-game timing
   const gameTime = new Date(currentGameInfo.gameDate);
-  const thirtyMinutesBeforeGame = gameTime.getTime() - (30 * 60 * 1000);
+  const fiveMinutesBeforeGame = gameTime.getTime() - (5 * 60 * 1000);
   
-  if (now < thirtyMinutesBeforeGame) {
-    // Wait until 30 minutes before game
-    nextPollTime = new Date(thirtyMinutesBeforeGame);
-    const minutesUntil = Math.round((thirtyMinutesBeforeGame - now) / 60000);
-    console.log(`[${getTimestamp()}] Waiting ${minutesUntil} minutes until 30min before game`);
+  if (now < fiveMinutesBeforeGame) {
+    // Wait until 5 minutes before game
+    nextPollTime = new Date(fiveMinutesBeforeGame);
+    const minutesUntil = Math.round((fiveMinutesBeforeGame - now) / 60000);
+    console.log(`[${getTimestamp()}] Waiting ${minutesUntil} minutes until 5min before game`);
   } else {
-    // Within 30 minutes of game start - poll every 5 minutes
+    // Within 5 minutes of game start - poll every 10 seconds
     nextPollTime = new Date(now + POLL_INTERVALS.GAME_PREGAME);
-    console.log(`[${getTimestamp()}] Pre-game polling - every 5 minutes`);
+    console.log(`[${getTimestamp()}] Pre-game polling - every 10 seconds`);
   }
 }
 
@@ -441,8 +441,31 @@ async function sendCalAtBatResult(gamePk) {
 }
 
 
+// Fetch wrapper with timeout to prevent hanging requests
+async function fetchWithTimeout(url, timeoutMs = 15000) {
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
+  
+  try {
+    const response = await fetch(url, { 
+      signal: controller.signal,
+      headers: {
+        'User-Agent': 'Cal-Dinger-Bot/1.0'
+      }
+    });
+    clearTimeout(timeoutId);
+    return response;
+  } catch (error) {
+    clearTimeout(timeoutId);
+    if (error.name === 'AbortError') {
+      throw new Error(`Fetch timeout after ${timeoutMs}ms: ${url}`);
+    }
+    throw error;
+  }
+}
+
 async function fetchJson(url) {
-  const res = await fetch(url);
+  const res = await fetchWithTimeout(url);
   if (!res.ok) {
     throw new Error(`Fetch failed ${res.status} ${res.statusText}`);
   }
@@ -845,9 +868,82 @@ async function checkForCalDingers(gamePk) {
 
 let currentGamePk = null;
 let pollTimer = null;
+let lastPollTimestamp = Date.now();
+let watchdogTimer = null;
+
+// Global error handlers to prevent silent crashes
+process.on('unhandledRejection', (reason, promise) => {
+  console.error(`[${getTimestamp()}] Unhandled Rejection at:`, promise, 'reason:', reason);
+  console.error(`[${getTimestamp()}] Stack trace:`, reason?.stack);
+  // Don't exit process, just log the error
+});
+
+process.on('uncaughtException', (error) => {
+  console.error(`[${getTimestamp()}] Uncaught Exception:`, error);
+  console.error(`[${getTimestamp()}] Stack trace:`, error?.stack);
+  // Don't exit process, just log the error
+});
+
+// Watchdog timer to detect and restart stalled polling
+function startWatchdog() {
+  if (watchdogTimer) {
+    clearInterval(watchdogTimer);
+  }
+  
+  watchdogTimer = setInterval(() => {
+    const now = Date.now();
+    const timeSinceLastPoll = now - lastPollTimestamp;
+    
+    // Determine appropriate threshold based on polling state
+    let maxPollGap;
+    let stateDescription;
+    
+    if (nextPollTime) {
+      // We have a scheduled next poll - allow extra buffer past that time
+      const timeUntilNextPoll = nextPollTime.getTime() - now;
+      if (timeUntilNextPoll > 0) {
+        // Still waiting for scheduled poll time
+        maxPollGap = timeSinceLastPoll + timeUntilNextPoll + (10 * 60 * 1000); // 10 min buffer
+        stateDescription = `waiting for scheduled poll in ${Math.round(timeUntilNextPoll / 60000)}min`;
+      } else {
+        // Past scheduled poll time - should have polled by now
+        const overdue = now - nextPollTime.getTime();
+        maxPollGap = 5 * 60 * 1000; // 5 minutes past due time
+        stateDescription = `overdue by ${Math.round(overdue / 60000)}min`;
+      }
+    } else {
+      // No scheduled poll time - use shorter threshold since polling should be continuous
+      maxPollGap = 10 * 60 * 1000; // 10 minutes when no schedule set
+      stateDescription = 'no schedule set';
+    }
+    
+    if (timeSinceLastPoll > maxPollGap) {
+      console.error(`[${getTimestamp()}] WATCHDOG: Polling stalled! Last poll was ${Math.round(timeSinceLastPoll / 1000)}s ago (${stateDescription})`);
+      console.log(`[${getTimestamp()}] WATCHDOG: Restarting polling system...`);
+      
+      // Reset polling state
+      if (pollTimer) {
+        clearTimeout(pollTimer);
+        pollTimer = null;
+      }
+      nextPollTime = null;
+      
+      // Restart polling immediately
+      setTimeout(() => {
+        console.log(`[${getTimestamp()}] WATCHDOG: Initiating emergency restart of polling`);
+        pollLoop();
+      }, 1000);
+    } else {
+      console.log(`[${getTimestamp()}] WATCHDOG: Polling healthy (last poll ${Math.round(timeSinceLastPoll / 1000)}s ago, ${stateDescription})`);
+    }
+  }, 2 * 60 * 1000); // Check every 2 minutes
+}
 
 async function pollLoop() {
   try {
+    // Update heartbeat
+    lastPollTimestamp = Date.now();
+    
     // Check if we should poll now
     if (!shouldPollNow()) {
       return;
@@ -912,6 +1008,13 @@ async function pollLoop() {
     console.log(`[${getTimestamp()}] Polling for Cal dingers in gamePk:`, currentGamePk);
     await checkForCalDingers(currentGamePk);
     
+    // Heartbeat log every 5 minutes during active polling
+    const now = Date.now();
+    if (!pollLoop.lastHeartbeat || (now - pollLoop.lastHeartbeat) > 5 * 60 * 1000) {
+      console.log(`[${getTimestamp()}] 💓 HEARTBEAT: Bot is alive and polling (Game: ${currentGamePk || 'none'}, Status: ${currentGameInfo?.status?.detailedState || 'unknown'})`);
+      pollLoop.lastHeartbeat = now;
+    }
+    
     // Set next poll time based on current game state
     setNextPollTime();
     
@@ -965,6 +1068,8 @@ function scheduleNextPoll(overrideDelay = null) {
 function startPolling() {
   if (pollTimer) return;
   console.log(`[${getTimestamp()}] Starting dynamic polling system...`);
+  // Start the watchdog timer
+  startWatchdog();
   // Kick off immediately
   pollLoop();
 }
