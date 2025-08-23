@@ -1005,6 +1005,22 @@ async function pollLoop() {
       await checkIfCalIsUpToBat(currentGamePk);
     }
     
+    // Check if game is finished BEFORE polling to prevent infinite loops
+    if (currentGameInfo?.status?.detailedState && 
+        (currentGameInfo.status.detailedState === 'Final' || 
+         currentGameInfo.status.detailedState === 'Game Over' || 
+         currentGameInfo.status.detailedState === 'Completed Early')) {
+      console.log(`[${getTimestamp()}] Game finished (${currentGameInfo.status.detailedState}) - resetting game tracking`);
+      currentGamePk = null;
+      currentGameInfo = null;
+      calIsUpToBat = false;
+      gameStartNotificationSent = false; // Reset for next game
+      // Set next poll time to search for next game in 5 seconds
+      nextPollTime = new Date(Date.now() + 5000);
+      scheduleNextPoll();
+      return; // Exit early to prevent polling finished game
+    }
+
     console.log(`[${getTimestamp()}] Polling for Cal dingers in gamePk:`, currentGamePk);
     await checkForCalDingers(currentGamePk);
     
@@ -1017,19 +1033,6 @@ async function pollLoop() {
     
     // Set next poll time based on current game state
     setNextPollTime();
-    
-    // If no next poll time was set (game finished), reset and search for next game
-    if (!nextPollTime && currentGameInfo?.status?.detailedState && 
-        (currentGameInfo.status.detailedState === 'Final' || 
-         currentGameInfo.status.detailedState === 'Game Over' || 
-         currentGameInfo.status.detailedState === 'Completed Early')) {
-      console.log(`[${getTimestamp()}] Resetting game tracking to search for next game`);
-      currentGamePk = null;
-      currentGameInfo = null;
-      calIsUpToBat = false;
-      // Set a short poll time to immediately search for next game
-      nextPollTime = new Date(Date.now() + 5000); // 5 seconds
-    }
     
     // Schedule next poll based on nextPollTime
     scheduleNextPoll();
