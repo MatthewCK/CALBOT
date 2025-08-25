@@ -21,6 +21,9 @@ const POLL_INTERVAL_MS = Number(process.env.POLL_INTERVAL_MS || 15000);
 // Enhanced plate appearance notifications flag
 const ENHANCED_PA = process.env.ENHANCED_PA === 'true' || process.env.ENHANCED_PA === '1';
 
+// Startup silently flag - if true, skip initial confirmation message
+const STARTUP_SILENTLY = process.env.STARTUP_SILENTLY === 'true' || process.env.STARTUP_SILENTLY === '1';
+
 // Home run wager data
 const WAGER_DATA = {
   Tim: [54, 55, 56, 60],
@@ -38,6 +41,7 @@ console.log(`[${getTimestamp()}] Mariners Team ID:`, MARINERS_TEAM_ID);
 console.log(`[${getTimestamp()}] Current Season:`, CURRENT_SEASON);
 console.log(`[${getTimestamp()}] Poll Interval (ms):`, POLL_INTERVAL_MS);
 console.log(`[${getTimestamp()}] Enhanced PA Notifications:`, ENHANCED_PA ? 'Enabled' : 'Disabled (home runs only)');
+console.log(`[${getTimestamp()}] Startup Silently:`, STARTUP_SILENTLY ? 'Enabled (no startup message)' : 'Disabled (startup message will be sent)');
 console.log(`[${getTimestamp()}] ================================`);
 
 // Initialize WhatsApp client
@@ -180,7 +184,7 @@ whatsappClient.on('qr', (qr) => {
   }
 });
 
-whatsappClient.on('ready', () => {
+whatsappClient.on('ready', async () => {
   try {
     console.log(`[${getTimestamp()}] WhatsApp client is ready!`);
     whatsappReady = true;
@@ -202,6 +206,13 @@ whatsappClient.on('auth_failure', (msg) => {
 async function checkAndSendInitialConfirmation() {
   if (initialConfirmationSent) {
     console.log(`[${getTimestamp()}] Initial confirmation already sent, skipping...`);
+    return;
+  }
+  
+  // Skip initial confirmation if STARTUP_SILENTLY is enabled
+  if (STARTUP_SILENTLY) {
+    console.log(`[${getTimestamp()}] STARTUP_SILENTLY enabled - skipping initial confirmation message`);
+    initialConfirmationSent = true;
     return;
   }
   
@@ -289,6 +300,7 @@ function setNextPollTime() {
   if (calIsUpToBat) {
     nextPollTime = new Date(now + POLL_INTERVALS.CAL_BATTING);
     console.log(`[${getTimestamp()}] Cal is up to bat - switching to 10-second polling`);
+    scheduleWatchdogCheck();
     return;
   }
   
@@ -302,6 +314,7 @@ function setNextPollTime() {
   if (gameStatus === 'In Progress') {
     nextPollTime = new Date(now + POLL_INTERVALS.GAME_ACTIVE);
     console.log(`[${getTimestamp()}] Game in progress - polling every 30 seconds`);
+    scheduleWatchdogCheck();
     return;
   }
   
@@ -321,10 +334,12 @@ function setNextPollTime() {
     nextPollTime = new Date(fiveMinutesBeforeGame);
     const minutesUntil = Math.round((fiveMinutesBeforeGame - now) / 60000);
     console.log(`[${getTimestamp()}] Waiting ${minutesUntil} minutes until 5min before game`);
+    scheduleWatchdogCheck();
   } else {
     // Within 5 minutes of game start - poll every 10 seconds
     nextPollTime = new Date(now + POLL_INTERVALS.GAME_PREGAME);
     console.log(`[${getTimestamp()}] Pre-game polling - every 10 seconds`);
+    scheduleWatchdogCheck();
   }
 }
 
@@ -759,9 +774,7 @@ function formatHrMessage(play, seasonStats = null, gameFeed = null) {
   const rbis = play?.result?.rbi;
   const desc = play?.result?.description || 'Home run!';
   
-  // Calculate new season total (current HR + this HR)
   const currentSeasonHRs = seasonStats?.homeRuns || 0;
-  const newSeasonTotal = currentSeasonHRs + 1;
   
   // Extract current game score and Cal's stats
   let gameInfoText = '';
@@ -819,8 +832,8 @@ function formatHrMessage(play, seasonStats = null, gameFeed = null) {
   if (exitVelo) mainMessage += `\nEV ${exitVelo} mph`;
   if (launchAngle) mainMessage += ` • LA ${launchAngle}°`;
   if (distance) mainMessage += ` • ${distance} ft 🚀`;
-  mainMessage += `\n\n🏆 Season HR #${newSeasonTotal}`;
-  const wagerSection = formatWagerSection(newSeasonTotal, seasonStats);
+  mainMessage += `\n\n🏆 Season HR #${currentSeasonHRs}`;
+  const wagerSection = formatWagerSection(currentSeasonHRs, seasonStats);
   
   return mainMessage + gameInfoText + wagerSection;
 }
@@ -884,41 +897,50 @@ process.on('uncaughtException', (error) => {
   // Don't exit process, just log the error
 });
 
-// Watchdog timer to detect and restart stalled polling
-function startWatchdog() {
+// Adaptive watchdog that adjusts timing based on polling frequency
+function scheduleWatchdogCheck() {
+  // Clear any existing watchdog timer
   if (watchdogTimer) {
-    clearInterval(watchdogTimer);
+    clearTimeout(watchdogTimer);
+    watchdogTimer = null;
   }
   
-  watchdogTimer = setInterval(() => {
-    const now = Date.now();
-    const timeSinceLastPoll = now - lastPollTimestamp;
+  // Only schedule watchdog if we have a next poll time
+  if (!nextPollTime) {
+    console.log(`[${getTimestamp()}] WATCHDOG: No next poll time set, skipping watchdog schedule`);
+    return;
+  }
+  
+  const now = Date.now();
+  const pollInterval = nextPollTime.getTime() - now;
+  
+  // Determine watchdog timing based on polling frequency
+  let watchdogDelay, toleranceWindow, description;
+  
+  if (pollInterval <= 30000) {
+    // Fast polling (≤30s) - wait for 3 missed polls before triggering
+    const missedPollsTimeout = pollInterval * 3;
+    watchdogDelay = pollInterval + missedPollsTimeout;
+    toleranceWindow = missedPollsTimeout;
+    description = `fast polling (${Math.round(pollInterval/1000)}s interval, 3 missed polls)`;
+  } else {
+    // Slow polling (>30s) - wait 1 minute after expected poll
+    watchdogDelay = pollInterval + (60 * 1000);
+    toleranceWindow = 60 * 1000;
+    description = `slow polling (${Math.round(pollInterval/1000)}s interval, 1min tolerance)`;
+  }
+  
+  console.log(`[${getTimestamp()}] WATCHDOG: Scheduled for ${description} - checking in ${Math.round(watchdogDelay / 1000)}s`);
+  
+  watchdogTimer = setTimeout(() => {
+    const checkTime = Date.now();
+    const timeSinceLastPoll = checkTime - lastPollTimestamp;
+    const timeSinceScheduledPoll = checkTime - nextPollTime.getTime();
     
-    // Determine appropriate threshold based on polling state
-    let maxPollGap;
-    let stateDescription;
-    
-    if (nextPollTime) {
-      // We have a scheduled next poll - allow extra buffer past that time
-      const timeUntilNextPoll = nextPollTime.getTime() - now;
-      if (timeUntilNextPoll > 0) {
-        // Still waiting for scheduled poll time
-        maxPollGap = timeSinceLastPoll + timeUntilNextPoll + (10 * 60 * 1000); // 10 min buffer
-        stateDescription = `waiting for scheduled poll in ${Math.round(timeUntilNextPoll / 60000)}min`;
-      } else {
-        // Past scheduled poll time - should have polled by now
-        const overdue = now - nextPollTime.getTime();
-        maxPollGap = 5 * 60 * 1000; // 5 minutes past due time
-        stateDescription = `overdue by ${Math.round(overdue / 60000)}min`;
-      }
-    } else {
-      // No scheduled poll time - use shorter threshold since polling should be continuous
-      maxPollGap = 10 * 60 * 1000; // 10 minutes when no schedule set
-      stateDescription = 'no schedule set';
-    }
-    
-    if (timeSinceLastPoll > maxPollGap) {
-      console.error(`[${getTimestamp()}] WATCHDOG: Polling stalled! Last poll was ${Math.round(timeSinceLastPoll / 1000)}s ago (${stateDescription})`);
+    // Check if polling has stalled beyond our tolerance
+    if (timeSinceScheduledPoll > toleranceWindow) {
+      console.error(`[${getTimestamp()}] WATCHDOG: Polling stalled! Scheduled poll was ${Math.round(timeSinceScheduledPoll / 1000)}s ago (tolerance: ${Math.round(toleranceWindow / 1000)}s)`);
+      console.error(`[${getTimestamp()}] WATCHDOG: Last successful poll was ${Math.round(timeSinceLastPoll / 1000)}s ago`);
       console.log(`[${getTimestamp()}] WATCHDOG: Restarting polling system...`);
       
       // Reset polling state
@@ -927,6 +949,11 @@ function startWatchdog() {
         pollTimer = null;
       }
       nextPollTime = null;
+      // Clear watchdog since no poll is scheduled
+      if (watchdogTimer) {
+        clearTimeout(watchdogTimer);
+        watchdogTimer = null;
+      }
       
       // Restart polling immediately
       setTimeout(() => {
@@ -934,9 +961,14 @@ function startWatchdog() {
         pollLoop();
       }, 1000);
     } else {
-      console.log(`[${getTimestamp()}] WATCHDOG: Polling healthy (last poll ${Math.round(timeSinceLastPoll / 1000)}s ago, ${stateDescription})`);
+      console.log(`[${getTimestamp()}] WATCHDOG: Polling healthy (${Math.round(timeSinceScheduledPoll / 1000)}s after scheduled, within ${Math.round(toleranceWindow / 1000)}s tolerance)`);
     }
-  }, 2 * 60 * 1000); // Check every 2 minutes
+  }, watchdogDelay);
+}
+
+// Legacy function kept for compatibility - now just calls scheduleWatchdogCheck
+function startWatchdog() {
+  scheduleWatchdogCheck();
 }
 
 async function pollLoop() {
@@ -963,6 +995,11 @@ async function pollLoop() {
       currentGameInfo = null;
       calIsUpToBat = false;
       nextPollTime = null;
+      // Clear watchdog since no poll is scheduled
+      if (watchdogTimer) {
+        clearTimeout(watchdogTimer);
+        watchdogTimer = null;
+      }
     }
     lastCheckedDate = today;
     
@@ -978,9 +1015,11 @@ async function pollLoop() {
           const hoursUntil = Math.round(timeUntilGame / (1000 * 60 * 60));
           console.log(`[${getTimestamp()}] Next Mariners game in ${hoursUntil} hours. Checking again in 4 hours.`);
           nextPollTime = new Date(Date.now() + (4 * 60 * 60 * 1000)); // Check every 4 hours
+          scheduleWatchdogCheck();
         } else {
           console.log(`[${getTimestamp()}] No upcoming Mariners games found; will retry in 30 minutes`);
           nextPollTime = new Date(Date.now() + (30 * 60 * 1000));
+          scheduleWatchdogCheck();
         }
         return;
       }
@@ -1017,6 +1056,7 @@ async function pollLoop() {
       gameStartNotificationSent = false; // Reset for next game
       // Set next poll time to search for next game in 5 seconds
       nextPollTime = new Date(Date.now() + 5000);
+      scheduleWatchdogCheck();
       scheduleNextPoll();
       return; // Exit early to prevent polling finished game
     }
