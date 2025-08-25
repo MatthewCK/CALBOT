@@ -1,10 +1,11 @@
 {
   "permissions": {
+    "allow": [
+      "Bash(node:*)",
+      "Read(/c:\\Users\\mkeip\\OneDrive\\Pictures\\Claude screenies/**)"
+    ],
     "additionalDirectories": [
       "C:\\c\\Users\\mkeip\\.cursor\\projects"
-    ],
-    "allow": [
-      "Bash(node:*)"
     ]
   }
 }
