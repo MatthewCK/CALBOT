@@ -284,8 +284,8 @@ async function checkAndSendGameStartNotification(gamePk) {
 
 // Polling intervals in milliseconds
 const POLL_INTERVALS = {
-  CAL_BATTING: 10 * 1000,     // 10 seconds when Cal is up
-  GAME_ACTIVE: 30 * 1000,     // 30 seconds during game
+  CAL_BATTING: 30 * 1000,     // 30 seconds when Cal is up
+  GAME_ACTIVE: 60 * 1000,     // 60 seconds during game
   GAME_PREGAME: 10 * 1000,    // 10 seconds before game starts
   GAME_DISTANT: null          // Calculate based on game time
 };
@@ -299,7 +299,7 @@ function setNextPollTime() {
   
   if (calIsUpToBat) {
     nextPollTime = new Date(now + POLL_INTERVALS.CAL_BATTING);
-    console.log(`[${getTimestamp()}] Cal is up to bat - switching to 10-second polling`);
+    console.log(`[${getTimestamp()}] Cal is up to bat - switching to 30-second polling`);
     scheduleWatchdogCheck();
     return;
   }
@@ -313,7 +313,7 @@ function setNextPollTime() {
   
   if (gameStatus === 'In Progress') {
     nextPollTime = new Date(now + POLL_INTERVALS.GAME_ACTIVE);
-    console.log(`[${getTimestamp()}] Game in progress - polling every 30 seconds`);
+    console.log(`[${getTimestamp()}] Game in progress - polling every 60 seconds`);
     scheduleWatchdogCheck();
     return;
   }
@@ -367,7 +367,7 @@ async function checkIfCalIsUpToBat(gamePk) {
     
     // Check if Cal just finished his at-bat
     if (calIsUpToBat) {
-      console.log(`[${getTimestamp()}] Cal finished his at-bat, switching back to 30-second polling`);
+      console.log(`[${getTimestamp()}] Cal finished his at-bat, switching back to 60-second polling`);
       calIsUpToBat = false;
       setNextPollTime();
       
@@ -707,7 +707,7 @@ function calculateWagerProbabilities(currentHRs, projectedHRs, seasonStats = nul
   }
   
   // Normalize probabilities and convert to percentages
-  const normalizationFactor = Math.min(0.85, totalWinProbability); // Cap total win probability at 85%
+  const normalizationFactor = totalWinProbability;
   const results = {};
   
   for (const [person, rawProb] of Object.entries(probabilities)) {
@@ -715,7 +715,7 @@ function calculateWagerProbabilities(currentHRs, projectedHRs, seasonStats = nul
     
     results[person] = {
       numbers: WAGER_DATA[person],
-      probability: Math.max(0.01, normalizedProb), // Minimum 1% chance
+      probability: normalizedProb,
       inRange: WAGER_DATA[person].some(num => Math.abs(num - projectedHRs) <= 2) // Within 2 HRs of projection
     };
   }
@@ -724,7 +724,7 @@ function calculateWagerProbabilities(currentHRs, projectedHRs, seasonStats = nul
   const totalAssignedProb = Object.values(results).reduce((sum, data) => sum + data.probability, 0);
   results['No Winner'] = {
     numbers: ['Other'],
-    probability: Math.max(0.05, 1 - totalAssignedProb), // At least 5% chance no one wins
+    probability: 1 - totalAssignedProb,
     inRange: false
   };
   
