@@ -57,7 +57,6 @@ let whatsappReady = false;
 let initialConfirmationSent = false;
 let currentQRCode = null;
 let gameStartNotificationSent = false;
-let lastCheckedDate = null;
 let currentGameInfo = null;
 let calIsUpToBat = false;
 let nextPollTime = null;
@@ -897,7 +896,7 @@ process.on('uncaughtException', (error) => {
   // Don't exit process, just log the error
 });
 
-// Adaptive watchdog that adjusts timing based on polling frequency
+// Smart watchdog that checks every 30 minutes if polling missed its scheduled time
 function scheduleWatchdogCheck() {
   // Clear any existing watchdog timer
   if (watchdogTimer) {
@@ -905,42 +904,33 @@ function scheduleWatchdogCheck() {
     watchdogTimer = null;
   }
   
-  // Only schedule watchdog if we have a next poll time
-  if (!nextPollTime) {
-    console.log(`[${getTimestamp()}] WATCHDOG: No next poll time set, skipping watchdog schedule`);
-    return;
-  }
+  // Always schedule watchdog every 30 minutes (1800000ms)
+  const watchdogInterval = 30 * 60 * 1000; // 30 minutes
   
-  const now = Date.now();
-  const pollInterval = nextPollTime.getTime() - now;
-  
-  // Determine watchdog timing based on polling frequency
-  let watchdogDelay, toleranceWindow, description;
-  
-  if (pollInterval <= 30000) {
-    // Fast polling (≤30s) - wait for 3 missed polls before triggering
-    const missedPollsTimeout = pollInterval * 3;
-    watchdogDelay = pollInterval + missedPollsTimeout;
-    toleranceWindow = missedPollsTimeout;
-    description = `fast polling (${Math.round(pollInterval/1000)}s interval, 3 missed polls)`;
-  } else {
-    // Slow polling (>30s) - wait 1 minute after expected poll
-    watchdogDelay = pollInterval + (60 * 1000);
-    toleranceWindow = 60 * 1000;
-    description = `slow polling (${Math.round(pollInterval/1000)}s interval, 1min tolerance)`;
-  }
-  
-  console.log(`[${getTimestamp()}] WATCHDOG: Scheduled for ${description} - checking in ${Math.round(watchdogDelay / 1000)}s`);
+  console.log(`[${getTimestamp()}] WATCHDOG: Scheduled check in 30 minutes`);
   
   watchdogTimer = setTimeout(() => {
     const checkTime = Date.now();
     const timeSinceLastPoll = checkTime - lastPollTimestamp;
-    const timeSinceScheduledPoll = checkTime - nextPollTime.getTime();
     
-    // Check if polling has stalled beyond our tolerance
-    if (timeSinceScheduledPoll > toleranceWindow) {
-      console.error(`[${getTimestamp()}] WATCHDOG: Polling stalled! Scheduled poll was ${Math.round(timeSinceScheduledPoll / 1000)}s ago (tolerance: ${Math.round(toleranceWindow / 1000)}s)`);
-      console.error(`[${getTimestamp()}] WATCHDOG: Last successful poll was ${Math.round(timeSinceLastPoll / 1000)}s ago`);
+    // Check if polling has missed its scheduled time
+    let pollingShouldHaveHappened = false;
+    let missedByMinutes = 0;
+    
+    if (nextPollTime) {
+      const timeSinceScheduledPoll = checkTime - nextPollTime.getTime();
+      // Allow 2 minute buffer for scheduling delays
+      const scheduleBuffer = 2 * 60 * 1000; // 2 minutes
+      
+      if (timeSinceScheduledPoll > scheduleBuffer) {
+        pollingShouldHaveHappened = true;
+        missedByMinutes = Math.round(timeSinceScheduledPoll / (60 * 1000));
+      }
+    }
+    
+    if (pollingShouldHaveHappened) {
+      console.error(`[${getTimestamp()}] WATCHDOG: Polling missed its scheduled time! Should have polled ${missedByMinutes} minutes ago`);
+      console.error(`[${getTimestamp()}] WATCHDOG: Last actual poll was ${Math.round(timeSinceLastPoll / (60 * 1000))} minutes ago`);
       console.log(`[${getTimestamp()}] WATCHDOG: Restarting polling system...`);
       
       // Reset polling state
@@ -949,21 +939,30 @@ function scheduleWatchdogCheck() {
         pollTimer = null;
       }
       nextPollTime = null;
-      // Clear watchdog since no poll is scheduled
-      if (watchdogTimer) {
-        clearTimeout(watchdogTimer);
-        watchdogTimer = null;
-      }
       
       // Restart polling immediately
       setTimeout(() => {
         console.log(`[${getTimestamp()}] WATCHDOG: Initiating emergency restart of polling`);
         pollLoop();
       }, 1000);
+    } else if (nextPollTime) {
+      const nextPollInMinutes = Math.round((nextPollTime.getTime() - checkTime) / (60 * 1000));
+      console.log(`[${getTimestamp()}] WATCHDOG: Polling healthy - next poll in ${nextPollInMinutes} minutes, last poll ${Math.round(timeSinceLastPoll / (60 * 1000))} minutes ago`);
     } else {
-      console.log(`[${getTimestamp()}] WATCHDOG: Polling healthy (${Math.round(timeSinceScheduledPoll / 1000)}s after scheduled, within ${Math.round(toleranceWindow / 1000)}s tolerance)`);
+      // No nextPollTime set - this indicates a broken polling system that should restart immediately
+      const lastPollMinutes = Math.round(timeSinceLastPoll / (60 * 1000));
+      console.error(`[${getTimestamp()}] WATCHDOG: No nextPollTime set - polling system is broken! Last poll was ${lastPollMinutes} minutes ago`);
+      console.log(`[${getTimestamp()}] WATCHDOG: Restarting polling system immediately...`);
+      
+      setTimeout(() => {
+        console.log(`[${getTimestamp()}] WATCHDOG: Initiating restart due to missing nextPollTime`);
+        pollLoop();
+      }, 1000);
     }
-  }, watchdogDelay);
+    
+    // Schedule the next watchdog check
+    scheduleWatchdogCheck();
+  }, watchdogInterval);
 }
 
 // Legacy function kept for compatibility - now just calls scheduleWatchdogCheck
@@ -986,22 +985,6 @@ async function pollLoop() {
       await checkAndSendInitialConfirmation();
     }
     
-    // Reset flags if it's a new day
-    const today = getTodayDateString();
-    if (lastCheckedDate && lastCheckedDate !== today) {
-      console.log(`[${getTimestamp()}] New day detected, resetting notification flags`);
-      gameStartNotificationSent = false;
-      currentGamePk = null;
-      currentGameInfo = null;
-      calIsUpToBat = false;
-      nextPollTime = null;
-      // Clear watchdog since no poll is scheduled
-      if (watchdogTimer) {
-        clearTimeout(watchdogTimer);
-        watchdogTimer = null;
-      }
-    }
-    lastCheckedDate = today;
     
     if (!currentGamePk) {
       console.log(`[${getTimestamp()}] No current gamePk, searching for today's Mariners game...`);
@@ -1024,6 +1007,9 @@ async function pollLoop() {
         return;
       }
       console.log(`[${getTimestamp()}] Found and now tracking gamePk:`, currentGamePk);
+      
+      // Reset notification flags for new game
+      gameStartNotificationSent = false;
       
       // Get game info for polling calculations
       const scheduleUrl = `https://statsapi.mlb.com/api/v1/schedule?date=${getTodayDateString()}&teamId=${MARINERS_TEAM_ID}&sportId=1`;
