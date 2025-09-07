@@ -2,7 +2,10 @@
   "permissions": {
     "allow": [
       "Bash(node:*)",
-      "Read(/c:\\Users\\mkeip\\OneDrive\\Pictures\\Claude screenies/**)"
+      "Read(/c:\\Users\\mkeip\\OneDrive\\Pictures\\Claude screenies/**)",
+      "WebSearch",
+      "WebFetch(domain:wwebjs.dev)",
+      "WebFetch(domain:docs.wwebjs.dev)"
     ],
     "additionalDirectories": [
       "C:\\c\\Users\\mkeip\\.cursor\\projects"

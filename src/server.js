@@ -61,6 +61,30 @@ let currentGameInfo = null;
 let calIsUpToBat = false;
 let nextPollTime = null;
 
+// WhatsApp reliability variables
+const AUTH_TIMEOUT = process.env.WHATSAPP_AUTH_TIMEOUT || 90000; // 90 seconds
+const MAX_AUTH_RETRIES = process.env.WHATSAPP_MAX_RETRIES || 3;
+const MAX_RECONNECT_ATTEMPTS = 10;
+const BASE_DELAY = 5000; // 5 seconds
+const MAX_DELAY = 300000; // 5 minutes
+const RESET_ATTEMPTS_AFTER = 3600000; // 1 hour
+const HEALTH_CHECK_INTERVAL = process.env.WHATSAPP_HEALTH_CHECK_INTERVAL || 300000; // 5 minutes
+const MAX_SILENCE_DURATION = process.env.WHATSAPP_MAX_SILENCE || 1800000; // 30 minutes
+const PING_TIMEOUT = 30000; // 30 seconds
+const MAX_QUEUE_SIZE = 100;
+
+let authTimeout = null;
+let authRetries = 0;
+let lastQRTime = null;
+let reconnectAttempts = 0;
+let lastReconnectTime = 0;
+let reconnectTimer = null;
+let isRestarting = false;
+let lastHealthCheck = Date.now();
+let healthCheckTimer = null;
+let lastActivityTime = Date.now();
+const messageQueue = [];
+
 // Data cache to reduce redundant API calls
 const cache = {
   calStats: { data: null, timestamp: 0, ttl: 60000 }, // 1 minute
@@ -164,7 +188,10 @@ async function fetchLiveFeed(gamePk) {
 whatsappClient.on('qr', (qr) => {
   try {
     currentQRCode = qr;
-    console.log(`[${getTimestamp()}] === WHATSAPP QR CODE ===`);
+    lastQRTime = Date.now();
+    authRetries++;
+    
+    console.log(`[${getTimestamp()}] === WHATSAPP QR CODE (Attempt ${authRetries}) ===`);
     console.log(`[${getTimestamp()}] QR Code Data (copy this to a QR code generator if needed):`);
     console.log(`[${getTimestamp()}]`, qr);
     console.log(`[${getTimestamp()}] --- End QR Code Data ---`);
@@ -178,6 +205,17 @@ whatsappClient.on('qr', (qr) => {
     }
     
     console.log(`[${getTimestamp()}] === END WHATSAPP QR CODE ===`);
+    
+    // Clear any existing timeout
+    if (authTimeout) clearTimeout(authTimeout);
+    
+    // Set timeout for authentication
+    authTimeout = setTimeout(() => {
+      console.warn(`[${getTimestamp()}] Authentication timeout after ${AUTH_TIMEOUT/1000}s - attempt ${authRetries}`);
+      handleAuthTimeout();
+    }, AUTH_TIMEOUT);
+    
+    logWhatsAppEvent('QR_GENERATED', { attempt: authRetries });
   } catch (error) {
     console.error(`[${getTimestamp()}] Error handling QR code:`, error.message);
   }
@@ -185,10 +223,24 @@ whatsappClient.on('qr', (qr) => {
 
 whatsappClient.on('ready', async () => {
   try {
-    console.log(`[${getTimestamp()}] WhatsApp client is ready!`);
+    lastActivityTime = Date.now();
     whatsappReady = true;
-    // Add a small delay to prevent race conditions
-    setTimeout(() => {
+    reconnectAttempts = 0; // Reset on successful connection
+    authRetries = 0; // Reset auth retries on success
+    
+    // Clear auth timeout
+    if (authTimeout) {
+      clearTimeout(authTimeout);
+      authTimeout = null;
+    }
+    
+    console.log(`[${getTimestamp()}] WhatsApp client is ready!`);
+    logWhatsAppEvent('READY');
+    startHealthChecks();
+    
+    // Process any queued messages
+    setTimeout(async () => {
+      await processMessageQueue();
       checkAndSendInitialConfirmation();
     }, 1000);
   } catch (error) {
@@ -196,8 +248,25 @@ whatsappClient.on('ready', async () => {
   }
 });
 
-whatsappClient.on('auth_failure', (msg) => {
+whatsappClient.on('auth_failure', async (msg) => {
   console.error(`[${getTimestamp()}] WhatsApp authentication failed:`, msg);
+  whatsappReady = false;
+  logWhatsAppEvent('AUTH_FAILURE', { message: msg });
+  await clearCorruptedSession();
+  await restartWhatsAppClient();
+});
+
+whatsappClient.on('disconnected', (reason) => {
+  console.warn(`[${getTimestamp()}] WhatsApp disconnected:`, reason);
+  whatsappReady = false;
+  logWhatsAppEvent('DISCONNECTED', { reason });
+  
+  // Reset attempts counter if it's been a while since last attempt
+  if (Date.now() - lastReconnectTime > RESET_ATTEMPTS_AFTER) {
+    reconnectAttempts = 0;
+  }
+  
+  attemptReconnect();
 });
 
 // WhatsApp will be initialized after server starts
@@ -583,13 +652,214 @@ async function findNextMarinersGame() {
   }
 }
 
+// WhatsApp reliability functions
+function logWhatsAppEvent(event, data = {}) {
+  console.log(`[${getTimestamp()}] WHATSAPP_${event.toUpperCase()}:`, JSON.stringify({
+    event,
+    timestamp: Date.now(),
+    ready: whatsappReady,
+    attempts: reconnectAttempts,
+    ...data
+  }));
+}
 
+async function handleAuthTimeout() {
+  if (authRetries >= MAX_AUTH_RETRIES) {
+    console.error(`[${getTimestamp()}] Max auth retries (${MAX_AUTH_RETRIES}) reached`);
+    await clearCorruptedSession();
+    authRetries = 0;
+  }
+  await restartWhatsAppClient();
+}
+
+async function clearCorruptedSession() {
+  try {
+    const fs = require('fs').promises;
+    const path = require('path');
+    const sessionPath = path.join(process.cwd(), '.wwebjs_auth');
+    
+    console.warn(`[${getTimestamp()}] Clearing corrupted session data`);
+    await fs.rm(sessionPath, { recursive: true, force: true });
+  } catch (error) {
+    console.error(`[${getTimestamp()}] Error clearing session:`, error.message);
+  }
+}
+
+async function restartWhatsAppClient() {
+  if (isRestarting) {
+    console.log(`[${getTimestamp()}] Client restart already in progress`);
+    return;
+  }
+  
+  isRestarting = true;
+  whatsappReady = false;
+  
+  try {
+    console.log(`[${getTimestamp()}] Restarting WhatsApp client...`);
+    
+    // Stop health checks
+    if (healthCheckTimer) {
+      clearInterval(healthCheckTimer);
+      healthCheckTimer = null;
+    }
+    
+    // Destroy current client
+    await whatsappClient.destroy();
+    
+    // Clear timeouts
+    if (authTimeout) {
+      clearTimeout(authTimeout);
+      authTimeout = null;
+    }
+    if (reconnectTimer) {
+      clearTimeout(reconnectTimer);
+      reconnectTimer = null;
+    }
+    
+    // Wait before reinitializing
+    await new Promise(resolve => setTimeout(resolve, 5000));
+    
+    // Reinitialize
+    whatsappClient.initialize();
+    
+  } catch (error) {
+    console.error(`[${getTimestamp()}] Error restarting WhatsApp client:`, error.message);
+  } finally {
+    isRestarting = false;
+  }
+}
+
+async function attemptReconnect() {
+  if (reconnectAttempts >= MAX_RECONNECT_ATTEMPTS) {
+    console.error(`[${getTimestamp()}] Max reconnection attempts (${MAX_RECONNECT_ATTEMPTS}) reached`);
+    // Clear session and start fresh
+    await clearCorruptedSession();
+    reconnectAttempts = 0;
+  }
+  
+  const delay = Math.min(BASE_DELAY * Math.pow(2, reconnectAttempts), MAX_DELAY);
+  reconnectAttempts++;
+  lastReconnectTime = Date.now();
+  
+  console.log(`[${getTimestamp()}] Attempting reconnection ${reconnectAttempts} in ${delay/1000}s`);
+  
+  reconnectTimer = setTimeout(async () => {
+    try {
+      await restartWhatsAppClient();
+    } catch (error) {
+      console.error(`[${getTimestamp()}] Reconnection attempt ${reconnectAttempts} failed:`, error.message);
+      attemptReconnect(); // Retry with longer delay
+    }
+  }, delay);
+}
+
+function startHealthChecks() {
+  if (healthCheckTimer) clearInterval(healthCheckTimer);
+  
+  healthCheckTimer = setInterval(async () => {
+    await performHealthCheck();
+  }, HEALTH_CHECK_INTERVAL);
+}
+
+async function performHealthCheck() {
+  const now = Date.now();
+  lastHealthCheck = now;
+  
+  if (!whatsappReady) {
+    console.warn(`[${getTimestamp()}] Health check: WhatsApp not ready`);
+    return;
+  }
+  
+  // Check for prolonged silence
+  if (now - lastActivityTime > MAX_SILENCE_DURATION) {
+    console.warn(`[${getTimestamp()}] Health check: No activity for ${(now - lastActivityTime)/60000} minutes`);
+    await performConnectionTest();
+  }
+}
+
+async function performConnectionTest() {
+  try {
+    console.log(`[${getTimestamp()}] Performing connection test...`);
+    
+    // Test connection by checking client state
+    const state = await Promise.race([
+      whatsappClient.getState(),
+      new Promise((_, reject) => setTimeout(() => reject(new Error('Timeout')), PING_TIMEOUT))
+    ]);
+    
+    if (state !== 'CONNECTED') {
+      console.warn(`[${getTimestamp()}] Connection test failed - state: ${state}`);
+      await restartWhatsAppClient();
+    } else {
+      lastActivityTime = Date.now();
+      console.log(`[${getTimestamp()}] Connection test passed`);
+    }
+    
+  } catch (error) {
+    console.error(`[${getTimestamp()}] Connection test failed:`, error.message);
+    await restartWhatsAppClient();
+  }
+}
+
+async function processMessageQueue() {
+  while (messageQueue.length > 0 && whatsappReady) {
+    const queuedMessage = messageQueue.shift();
+    
+    try {
+      await sendMessageDirect(queuedMessage.message);
+      console.log(`[${getTimestamp()}] Sent queued message from ${new Date(queuedMessage.timestamp)}`);
+    } catch (error) {
+      console.error(`[${getTimestamp()}] Failed to send queued message:`, error.message);
+      
+      // Re-queue if not too old and hasn't failed too many times
+      if (queuedMessage.attempts < 3 && Date.now() - queuedMessage.timestamp < 3600000) {
+        queuedMessage.attempts++;
+        messageQueue.unshift(queuedMessage);
+      }
+      break;
+    }
+  }
+}
+
+function getWhatsAppStatus() {
+  const now = Date.now();
+  return {
+    ready: whatsappReady,
+    lastQRTime: lastQRTime,
+    lastActivityTime: lastActivityTime,
+    reconnectAttempts: reconnectAttempts,
+    authRetries: authRetries,
+    timeSinceLastActivity: lastActivityTime ? now - lastActivityTime : null,
+    isRestarting: isRestarting,
+    queueSize: messageQueue.length,
+    healthStatus: whatsappReady && (now - lastActivityTime < MAX_SILENCE_DURATION) ? 'healthy' : 'degraded'
+  };
+}
 
 async function sendWhatsApp(message) {
   if (!whatsappReady) {
-    console.log(`[${getTimestamp()}] WhatsApp not ready; skipping message:`, message);
+    console.log(`[${getTimestamp()}] WhatsApp not ready; queueing message`);
+    
+    if (messageQueue.length >= MAX_QUEUE_SIZE) {
+      messageQueue.shift(); // Remove oldest message
+    }
+    
+    messageQueue.push({
+      message,
+      timestamp: Date.now(),
+      attempts: 0
+    });
     return;
   }
+  
+  // Send queued messages first
+  await processMessageQueue();
+  
+  // Send current message
+  await sendMessageDirect(message);
+}
+
+async function sendMessageDirect(message) {
   if (!GROUP_CHAT_ID && RECIPIENT_NUMBERS.length === 0) {
     console.log(`[${getTimestamp()}] No group chat ID or recipient numbers configured; skipping WhatsApp message`);
     return;
@@ -610,6 +880,7 @@ async function sendWhatsApp(message) {
         await whatsappClient.sendMessage(chatId, message);
         console.log(`[${getTimestamp()}] WhatsApp message sent to ${number}`);
         successCount++;
+        lastActivityTime = Date.now(); // Update activity time on successful send
       } catch (error) {
         console.error(`[${getTimestamp()}] Failed to send WhatsApp to ${number}:`, error.message);
       }
@@ -623,6 +894,7 @@ async function sendWhatsApp(message) {
       await whatsappClient.sendMessage(GROUP_CHAT_ID, message);
       console.log(`[${getTimestamp()}] WhatsApp message sent to group chat: ${GROUP_CHAT_ID}`);
       successCount++;
+      lastActivityTime = Date.now(); // Update activity time on successful send
     } catch (error) {
       console.error(`[${getTimestamp()}] Failed to send WhatsApp to group ${GROUP_CHAT_ID}:`, error.message);
     }
@@ -1106,12 +1378,22 @@ function startPolling() {
 // Minimal server for Railway health check and manual trigger
 const app = express();
 app.get('/', (req, res) => {
+  const whatsappStatus = getWhatsAppStatus();
+  
   res.json({ 
     ok: true, 
     service: 'cal-dinger-bot', 
+    uptime: process.uptime(),
     trackingGamePk: currentGamePk || null,
-    whatsappReady: whatsappReady,
-    hasQRCode: !!currentQRCode,
+    whatsapp: {
+      ...whatsappStatus,
+      hasQRCode: !!currentQRCode
+    },
+    game: calStats ? {
+      gameStatus: calStats.gameStatus,
+      currentHR: calStats.currentHR,
+      isPolling: isPolling
+    } : null,
     timestamp: new Date().toISOString()
   });
 });
