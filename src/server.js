@@ -1397,25 +1397,45 @@ function startPolling() {
 
 // Minimal server for Railway health check and manual trigger
 const app = express();
-app.get('/', (req, res) => {
-  const whatsappStatus = getWhatsAppStatus();
-  
-  res.json({ 
-    ok: true, 
-    service: 'cal-dinger-bot', 
-    uptime: process.uptime(),
-    trackingGamePk: currentGamePk || null,
-    whatsapp: {
-      ...whatsappStatus,
-      hasQRCode: !!currentQRCode
-    },
-    game: calStats ? {
-      gameStatus: calStats.gameStatus,
-      currentHR: calStats.currentHR,
-      isPolling: isPolling
-    } : null,
-    timestamp: new Date().toISOString()
-  });
+app.get('/', async (req, res) => {
+  try {
+    const whatsappStatus = getWhatsAppStatus();
+    const calStats = await fetchCalSeasonStats();
+    
+    res.json({ 
+      ok: true, 
+      service: 'cal-dinger-bot', 
+      uptime: process.uptime(),
+      trackingGamePk: currentGamePk || null,
+      whatsapp: {
+        ...whatsappStatus,
+        hasQRCode: !!currentQRCode
+      },
+      game: calStats ? {
+        gameStatus: calStats.gameStatus,
+        currentHR: calStats.homeRuns,
+        isPolling: isPolling
+      } : null,
+      timestamp: new Date().toISOString()
+    });
+  } catch (error) {
+    console.error(`[${getTimestamp()}] Error in health check:`, error.message);
+    const whatsappStatus = getWhatsAppStatus();
+    
+    res.json({ 
+      ok: true, 
+      service: 'cal-dinger-bot', 
+      uptime: process.uptime(),
+      trackingGamePk: currentGamePk || null,
+      whatsapp: {
+        ...whatsappStatus,
+        hasQRCode: !!currentQRCode
+      },
+      game: null,
+      timestamp: new Date().toISOString(),
+      error: 'Could not fetch Cal stats'
+    });
+  }
 });
 app.post('/test-whatsapp', express.json(), async (req, res) => {
   const msg = req.body?.message || '🚨🚨🚨 TEST DINGER! 🚨🚨🚨 This is a test from Cal Dinger Bot! ⚾💥🏟️';
