@@ -957,45 +957,63 @@ function calculateWagerProbabilities(currentHRs, projectedHRs, seasonStats = nul
     numbers.forEach(num => allWinningNumbers.add(num));
   });
   
-  // Calculate probability for each possible HR total using normal distribution approximation
-  const probabilities = {};
-  let totalWinProbability = 0;
+  // Calculate probabilities for a reasonable range of HR outcomes (e.g., ±15 from projection)
+  const minHR = Math.max(0, Math.floor(projectedHRs - 15));
+  const maxHR = Math.ceil(projectedHRs + 15);
+  
+  // Calculate probability for each possible HR total
+  const hrProbabilities = {};
+  let totalProbabilityMass = 0;
+  
+  for (let hr = minHR; hr <= maxHR; hr++) {
+    const distance = Math.abs(hr - projectedHRs);
+    const variance = baseStdDev * baseStdDev;
+    const probability = (1 / Math.sqrt(2 * Math.PI * variance)) * Math.exp(-(distance * distance) / (2 * variance));
+    hrProbabilities[hr] = probability;
+    totalProbabilityMass += probability;
+  }
+  
+  // Normalize HR probabilities
+  for (let hr = minHR; hr <= maxHR; hr++) {
+    hrProbabilities[hr] = hrProbabilities[hr] / totalProbabilityMass;
+  }
+  
+  // Calculate probability for each person based on their picked numbers
+  const results = {};
   
   for (const [person, numbers] of Object.entries(WAGER_DATA)) {
     let personProbability = 0;
     
-    // Calculate probability Cal hits any of this person's numbers
+    // Sum probabilities for all of this person's numbers
     for (const targetHR of numbers) {
-      // Simplified normal distribution probability
-      // P(X = targetHR) ≈ probability density around that point
-      const distance = Math.abs(targetHR - projectedHRs);
-      const probability = Math.exp(-(distance * distance) / (2 * baseStdDev * baseStdDev));
-      personProbability += probability;
+      if (hrProbabilities[targetHR]) {
+        personProbability += hrProbabilities[targetHR];
+      }
     }
-    
-    probabilities[person] = personProbability;
-    totalWinProbability += personProbability;
-  }
-  
-  // Normalize probabilities and convert to percentages
-  const normalizationFactor = totalWinProbability;
-  const results = {};
-  
-  for (const [person, rawProb] of Object.entries(probabilities)) {
-    const normalizedProb = normalizationFactor > 0 ? (rawProb / totalWinProbability) * normalizationFactor : 0;
     
     results[person] = {
       numbers: WAGER_DATA[person],
-      probability: normalizedProb,
+      probability: personProbability,
       inRange: WAGER_DATA[person].some(num => Math.abs(num - projectedHRs) <= 2) // Within 2 HRs of projection
     };
   }
   
-  // Calculate "no winner" probability
-  const totalAssignedProb = Object.values(results).reduce((sum, data) => sum + data.probability, 0);
+  // Calculate "no winner" probability (all HR values not picked by anyone)
+  let noWinnerProbability = 0;
+  const allPickedNumbers = new Set();
+  Object.values(WAGER_DATA).forEach(numbers => {
+    numbers.forEach(num => allPickedNumbers.add(num));
+  });
+  
+  for (let hr = minHR; hr <= maxHR; hr++) {
+    if (!allPickedNumbers.has(hr)) {
+      noWinnerProbability += hrProbabilities[hr];
+    }
+  }
+  
   results['No Winner'] = {
     numbers: ['Other'],
-    probability: 1 - totalAssignedProb,
+    probability: noWinnerProbability,
     inRange: false
   };
   
@@ -1019,7 +1037,8 @@ function formatWagerSection(currentHRs, seasonStats = null) {
   
   playerResults.forEach(([person, data], index) => {
     const emoji = index === 0 ? '🥇' : index === 1 ? '🥈' : '🥉';
-    const percentStr = (data.probability * 100).toFixed(0);
+    const percent = data.probability * 100;
+    const percentStr = percent < 1 && percent > 0 ? '<1' : percent.toFixed(0);
     const numbersStr = data.numbers.join(',');
     const indicator = data.inRange ? ' 🎯' : '';
     
@@ -1029,7 +1048,8 @@ function formatWagerSection(currentHRs, seasonStats = null) {
   
   // Add "No Winner" at the end
   if (noWinnerResult) {
-    const percentStr = (noWinnerResult.probability * 100).toFixed(0);
+    const percent = noWinnerResult.probability * 100;
+    const percentStr = percent < 1 && percent > 0 ? '<1' : percent.toFixed(0);
     wagerText += `❌ No Winner: ${percentStr}%\n`;
   }
   
