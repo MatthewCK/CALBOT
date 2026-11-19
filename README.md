@@ -51,8 +51,8 @@ cp .env.example .env    # then edit .env
 npm start
 ```
 
-1. **Link WhatsApp:** open http://localhost:3000/qr and scan the code from WhatsApp → Settings → Linked Devices → Link a Device.
-2. **Find your group chat ID:** with `GROUP_CHAT_ID` blank, send any message in the group. The log shows `Message in group chat 120xxxxx@g.us`. Put that in `GROUP_CHAT_ID` and restart.
+1. **Link WhatsApp:** open `/qr` on wherever the bot is running (http://localhost:3000/qr locally, or your Railway URL plus `/qr`). Scan the code from WhatsApp → Settings → Linked Devices → Link a Device. The QR code isn't printed in the console; the log just says `WhatsApp needs linking`.
+2. **Find your group chat ID:** with `GROUP_CHAT_ID` blank, send any message in the group. The bot's log (the terminal running `npm start`, or the service's logs on Railway) shows `Message in group chat 120xxxxx@g.us`. If you're in several active groups, use the line that appears right after your message. Put that ID in `GROUP_CHAT_ID` and restart.
 3. **Test it:** send `!cal` in the group. The bot should reply.
 
 ## Configuration
@@ -122,9 +122,9 @@ The projection uses the player's home runs per team game so far, times the team'
 The repo includes Railway config (`railway.json`, `.nixpacks.toml`): it builds with Nixpacks, checks `/` to confirm the service is up, and always restarts it if it exits.
 
 1. Fork this repo and create a Railway project from it.
-2. Add your settings as service variables.
+2. Add your settings as service variables, and give the service a public URL: Settings → Networking → **Generate Domain**.
 3. **Add a volume** (e.g. mounted at `/data`) and set `DATA_DIR=/data`. Without it, every redeploy logs WhatsApp out and forgets which home runs were sent.
-4. Open `/qr` on your Railway URL and scan it.
+4. Open `https://<your-app>.up.railway.app/qr` and scan it. Then send the status command (`!cal`) in the chat to confirm it works.
 
 It should run anywhere that can run Node and headless Chrome. The service is meant to run during the season and be shut down in the offseason.
 
