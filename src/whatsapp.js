@@ -5,6 +5,8 @@ const { Client, LocalAuth } = require('whatsapp-web.js');
 
 const MAX_PENDING = 20;
 const CONNECTION_CHECK_MS = 5 * 60_000;
+const STATUS_COMMAND = '!cal';
+const STATUS_COOLDOWN_MS = 10_000; // per chat, so a burst of !cal gets one reply
 
 let client = null;
 const state = { ready: false, qr: null };
@@ -45,7 +47,7 @@ async function checkConnection() {
   if (status !== 'CONNECTED') exitForRestart(`WhatsApp state is ${status}`);
 }
 
-function start({ dataDir, groupChatId, recipientNumbers }) {
+function start({ dataDir, groupChatId, recipientNumbers, onStatusRequest }) {
   client = new Client({
     authStrategy: new LocalAuth({ dataPath: path.join(dataDir, '.wwebjs_auth') }),
     puppeteer: { headless: true, args: ['--no-sandbox', '--disable-setuid-sandbox'] },
@@ -69,13 +71,24 @@ function start({ dataDir, groupChatId, recipientNumbers }) {
   client.on('auth_failure', msg => console.error('WhatsApp auth failure:', msg));
   client.on('disconnected', reason => exitForRestart(`WhatsApp disconnected (${reason})`));
 
-  // Helps with setup: log group IDs so GROUP_CHAT_ID can be copied from the logs.
-  if (!groupChatId) {
-    client.on('message_create', m => {
-      const chatId = m.fromMe ? m.to : m.from;
-      if (chatId.endsWith('@g.us')) console.log(`Message in group chat ${chatId}`);
-    });
-  }
+  // message_create fires for everyone's messages, including ones sent from this account's phone.
+  const lastStatusReply = {};
+  client.on('message_create', async m => {
+    const chatId = m.fromMe ? m.to : m.from;
+    // Helps with setup: log group IDs so GROUP_CHAT_ID can be copied from the logs.
+    if (!groupChatId && chatId.endsWith('@g.us')) console.log(`Message in group chat ${chatId}`);
+
+    // Anyone in a configured chat can send !cal to check the bot is up.
+    if (m.body?.trim().toLowerCase() !== STATUS_COMMAND || !targets.includes(chatId)) return;
+    if (Date.now() - (lastStatusReply[chatId] || 0) < STATUS_COOLDOWN_MS) return;
+    lastStatusReply[chatId] = Date.now();
+    console.log(`${STATUS_COMMAND} received in ${chatId}`);
+    try {
+      await client.sendMessage(chatId, await onStatusRequest());
+    } catch (err) {
+      console.error(`${STATUS_COMMAND} reply failed:`, err.message);
+    }
+  });
 
   client.initialize().catch(err => exitForRestart(`WhatsApp failed to start: ${err.message}`));
   setInterval(checkConnection, CONNECTION_CHECK_MS);

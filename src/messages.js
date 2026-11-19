@@ -1,5 +1,5 @@
-// Home run message text and the season home run wager. Pure functions only.
-const { hitData, boxscorePlayer } = require('./mlb');
+// WhatsApp message text (home run alert, !cal reply) and the wager odds. Pure functions only.
+const { hitData, boxscorePlayer, lineupStatus } = require('./mlb');
 
 // Each person's picks for Cal's final regular-season home run total.
 const WAGER_PICKS = {
@@ -102,7 +102,58 @@ function homeRun(play, feed, stats, playerId) {
   return text;
 }
 
+function pacificTime(iso) {
+  return new Date(iso).toLocaleString('en-US', {
+    weekday: 'short', month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit',
+    timeZone: 'America/Los_Angeles',
+  }) + ' PT';
+}
+
+const ORDINALS = ['1st', '2nd', '3rd', '4th', '5th', '6th', '7th', '8th', '9th'];
+
+function whenCalIsUp({ battersAhead, marinersBatting }) {
+  if (!marinersBatting) {
+    return battersAhead === 0 ? 'Cal leads off the next Mariners inning'
+      : `Cal is due up ${ORDINALS[battersAhead]} next Mariners inning`;
+  }
+  if (battersAhead === 0) return 'Cal is batting right now! 👀';
+  if (battersAhead === 1) return 'Cal is on deck';
+  if (battersAhead === 2) return 'Cal is in the hole';
+  return `Cal is up after ${battersAhead} more batters`;
+}
+
+// Reply to "!cal": the bot is up, plus the current or next game and Cal's numbers.
+function status({ feed, nextGame, stats, playerId, teamId }) {
+  let text = '🤖 CAL DINGER BOT: ✅ Online';
+  const state = feed?.gameData.status.abstractGameState;
+
+  if (state === 'Live') {
+    text += `\n\n⚾ ${situation(feed)}`;
+    if (feed.gameData.status.detailedState !== 'In Progress') text += `\n⏸️ ${feed.gameData.status.detailedState}`;
+    const today = boxscorePlayer(feed, playerId)?.stats?.batting;
+    if (today?.plateAppearances || today?.atBats) {
+      text += `\n🏏 Cal today: ${today.hits || 0}/${today.atBats || 0}`;
+      if (today.homeRuns) text += ` • ${today.homeRuns} HR`;
+      if (today.rbi) text += ` • ${today.rbi} RBI`;
+    }
+    const lineup = lineupStatus(feed, playerId, teamId);
+    text += `\n⏭️ ${lineup ? whenCalIsUp(lineup) : "Cal isn't in the lineup"}`;
+  } else if (state === 'Preview') {
+    text += `\n\n⚾ ${matchup(feed)}\n🕐 ${pacificTime(feed.gameData.datetime.dateTime)}`;
+    const lineup = lineupStatus(feed, playerId, teamId);
+    text += `\n📋 ${lineup ? `Cal is batting ${ORDINALS[lineup.spot - 1]}` : 'Lineup not posted yet'}`;
+  } else if (nextGame) {
+    text += `\n\n📅 Next game: ${nextGame.teams.away.team.name} @ ${nextGame.teams.home.team.name}` +
+      `\n🕐 ${pacificTime(nextGame.gameDate)}`;
+  } else {
+    text += '\n\n📅 No Mariners game in the next 10 days';
+  }
+
+  if (stats) text += `\n\n🏆 Season: ${stats.homeRuns} HR${wagerSection(stats.homeRuns, stats.teamGames)}`;
+  return text;
+}
+
 module.exports = {
   WAGER_PICKS, wagerOdds, wagerSection,
-  homeRun, situation,
+  homeRun, situation, status,
 };

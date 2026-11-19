@@ -47,7 +47,11 @@ const feed = {
     boxscore: {
       teams: {
         away: { players: {} },
-        home: { players: { [`ID${CAL}`]: { stats: { batting: { hits: 2, atBats: 3, rbi: 3, runs: 1 } } } } },
+        home: { players: {
+          [`ID${CAL}`]: { battingOrder: '400', stats: { batting: { hits: 2, atBats: 3, homeRuns: 1, rbi: 3, runs: 1 } } },
+          ID200: { battingOrder: '200' },
+          ID301: { battingOrder: '301' }, // pinch hitter in the 3rd spot
+        } },
       },
     },
   },
@@ -113,4 +117,49 @@ test('wager is settled once the season is over', () => {
 
 test('situation line for the console shows inning and score', () => {
   assert.strictEqual(messages.situation(feed), 'Colorado Rockies @ Seattle Mariners - Bottom 5 (COL 3 - SEA 7)');
+});
+
+// Feed where the Mariners' last plate appearance was by `batterId`.
+function lineupFeed(batterId, { complete = true, inningState = 'Bottom' } = {}) {
+  const last = play(60, batterId, {}, null);
+  last.about.isComplete = complete;
+  return {
+    ...feed,
+    liveData: { ...feed.liveData, plays: { allPlays: [last] }, linescore: { ...feed.liveData.linescore, inningState } },
+  };
+}
+
+test('lineup: on deck, batting now, and next inning', () => {
+  // 2nd spot just finished, Cal bats 4th: one batter ahead of him.
+  assert.deepStrictEqual(mlb.lineupStatus(lineupFeed(200), CAL, 136), { spot: 4, battersAhead: 1, marinersBatting: true });
+  // Pinch hitter in the 3rd spot is still batting: Cal on deck.
+  assert.strictEqual(mlb.lineupStatus(lineupFeed(301, { complete: false }), CAL, 136).battersAhead, 1);
+  // 3rd spot finished: Cal is due now.
+  assert.strictEqual(mlb.lineupStatus(lineupFeed(301), CAL, 136).battersAhead, 0);
+  // Same, but the inning ended: he leads off next time.
+  const next = mlb.lineupStatus(lineupFeed(301, { inningState: 'Middle' }), CAL, 136);
+  assert.deepStrictEqual(next, { spot: 4, battersAhead: 0, marinersBatting: false });
+});
+
+test('lineup: null when Cal is not in it', () => {
+  assert.strictEqual(mlb.lineupStatus(feed, 12345, 136), null);
+});
+
+test('!cal reply during a game', () => {
+  const text = messages.status({ feed: lineupFeed(200), stats, playerId: CAL, teamId: 136 });
+  assert.match(text, /✅ Online/);
+  assert.match(text, /Colorado Rockies @ Seattle Mariners - Bottom 5 \(COL 3 - SEA 7\)/);
+  assert.match(text, /Cal today: 2\/3 • 1 HR • 3 RBI/);
+  assert.match(text, /Cal is on deck/);
+  assert.match(text, /Season: 59 HR/);
+});
+
+test('!cal reply before the game and between games', () => {
+  const preview = { ...feed, gameData: { ...feed.gameData, status: { abstractGameState: 'Preview', detailedState: 'Pre-Game' } } };
+  assert.match(messages.status({ feed: preview, playerId: CAL, teamId: 136 }), /Cal is batting 4th/);
+
+  const nextGame = { gameDate: '2026-04-03T02:10:00Z', teams: { away: { team: { name: 'Houston Astros' } }, home: { team: { name: 'Seattle Mariners' } } } };
+  const text = messages.status({ feed: null, nextGame, stats: null, playerId: CAL, teamId: 136 });
+  assert.match(text, /Next game: Houston Astros @ Seattle Mariners\n🕐 Thu, Apr 2, 7:10 PM PT/);
+  assert.doesNotMatch(text, /WAGER/);
 });

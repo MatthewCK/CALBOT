@@ -28,17 +28,21 @@ The bot projects the rest of the season at Cal's current pace: his home runs per
 
 The bot uses `whatsapp-web.js`, which runs WhatsApp Web in a hidden Chrome browser. If the connection drops, or a check every 5 minutes finds it isn't connected, the process exits and Railway restarts it. The saved login in `.wwebjs_auth/` (inside `DATA_DIR`) lets it reconnect without scanning again. Messages sent before WhatsApp finishes connecting are held (up to 20) and sent once it's ready.
 
-## Notification Levels
+## What Gets Sent
 
-### Default (`ENHANCED_PA` unset or `false`)
-- Startup message (skip it with `STARTUP_SILENTLY=true`)
-- Home run alerts
+Only home run alerts are sent on their own. For diagnostics and testing, the console log also shows game status changes (pre-game, in progress, delays, final), when Cal comes up to bat, and how each of his at-bats ended.
 
-### Enhanced (`ENHANCED_PA=true`)
-- Everything above, plus:
-- Game start
-- "Cal is up to bat"
-- The result of each of Cal's at-bats
+## Checking on the Bot: `!cal`
+
+Anyone in the group (or a chat listed in `RECIPIENT_NUMBERS`) can send `!cal` to check the bot is awake. It replies with:
+
+- ✅ Online, which shows the bot and its WhatsApp connection are working
+- During a game: inning and score, Cal's line today, and when he's up next ("on deck", "in the hole", "up after 4 more batters", "due up 2nd next Mariners inning")
+- Before a game: start time and where Cal is batting in the lineup
+- Between games: when the next game starts
+- Cal's season home runs and the wager odds
+
+It only answers in the chats it sends alerts to, and replies at most once every 10 seconds per chat.
 
 ## Setup
 
@@ -58,11 +62,7 @@ RECIPIENT_NUMBERS=15551234567,15559876543
 # WhatsApp group chat ID, e.g. 120363123456789012@g.us
 GROUP_CHAT_ID=120363123456789012@g.us
 
-# Optional features
-ENHANCED_PA=false
-STARTUP_SILENTLY=false
-
-# Needed to use the /test-whatsapp and /health-status endpoints
+# Needed to use the /test-whatsapp endpoint
 ADMIN_TOKEN=pick-a-long-random-string
 
 # Folder for the WhatsApp login and sent-HR list (default: current folder)
@@ -90,6 +90,7 @@ npm start
 - Put that ID in `GROUP_CHAT_ID` and restart.
 
 ### 6. Test
+Send `!cal` in the group, or call the test endpoint:
 ```bash
 curl -X POST http://localhost:3000/test-whatsapp \
   -H "x-admin-token: $ADMIN_TOKEN" \
@@ -100,7 +101,7 @@ curl -X POST http://localhost:3000/test-whatsapp \
 ## Deployment to Railway
 
 1. Push to GitHub and create a Railway project from the repo.
-2. Add the environment variables above in the Railway dashboard. Make sure to set `ADMIN_TOKEN` if you want the test endpoints.
+2. Add the environment variables above in the Railway dashboard. Set `ADMIN_TOKEN` if you want the test endpoint.
 3. Open `/qr` on your Railway URL and scan it.
 
 Railway builds with Nixpacks (`.nixpacks.toml`), checks `/` to confirm the service is up, and always restarts it if it exits.
@@ -111,10 +112,9 @@ Railway builds with Nixpacks (`.nixpacks.toml`), checks `/` to confirm the servi
 
 | Method | Path | Auth | Purpose |
 |---|---|---|---|
-| GET | `/` | none | Health check: WhatsApp status, game being watched, uptime |
+| GET | `/` | none | Health check: WhatsApp status, chats configured, game being watched, uptime |
 | GET | `/qr` | none | WhatsApp login QR code (only shown until linked) |
 | POST | `/test-whatsapp` | `x-admin-token` header | Send a test message (`{"message": "..."}`) |
-| POST | `/health-status` | `x-admin-token` header | Send a status report to the chat |
 
 ## Project Structure
 

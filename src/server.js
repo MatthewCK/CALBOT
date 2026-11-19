@@ -25,7 +25,7 @@ const ALREADY_SENT_AGE = 10 * MINUTE;  // on first look at a game, older HRs cou
 // --- State ---
 const sentPlays = new Set(readSentFile());
 const finishedGames = new Set();
-let game = null; // the game being watched: { pk, seeded, calAtBat }
+let game = null; // the game being watched: { pk, seeded, calAtBat, feed }
 let gameStatus = null;
 
 function readSentFile() {
@@ -62,6 +62,7 @@ async function poll() {
   }
 
   const feed = await mlb.getLiveFeed(game.pk);
+  game.feed = feed; // latest snapshot, used to answer !cal
   const status = feed.gameData.status;
   if (status.detailedState !== gameStatus) console.log(`Game ${game.pk}: ${status.detailedState}`);
   gameStatus = status.detailedState;
@@ -111,6 +112,13 @@ function logCalAtBats(feed) {
     game.calAtBat = currentPlay.about.atBatIndex;
     console.log(`Cal up to bat: ${messages.situation(feed)}`);
   }
+}
+
+// Reply to "!cal" in the chat: bot is up, plus game and Cal info.
+async function statusReply() {
+  const feed = game?.feed || null;
+  const nextGame = feed ? null : await mlb.findNextGame(TEAM_ID, finishedGames).catch(() => null);
+  return messages.status({ feed, nextGame, stats: await seasonStats(), playerId: PLAYER_ID, teamId: TEAM_ID });
 }
 
 async function pollForever() {
@@ -182,6 +190,7 @@ whatsapp.start({
   dataDir: DATA_DIR,
   groupChatId: GROUP_CHAT_ID,
   recipientNumbers: RECIPIENT_NUMBERS,
+  onStatusRequest: statusReply,
 });
 
 pollForever();

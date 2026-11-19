@@ -78,7 +78,37 @@ function boxscorePlayer(feed, playerId) {
   return teams.away?.players?.[`ID${playerId}`] || teams.home?.players?.[`ID${playerId}`] || null;
 }
 
+// Where Cal is relative to the Mariners' next batter. Returns null if he isn't in the
+// lineup (or it isn't posted yet). battersAhead 0 means he's due up now.
+function lineupStatus(feed, playerId, teamId) {
+  const marinersAway = feed.gameData.teams.away.id === teamId;
+  const players = feed.liveData?.boxscore?.teams?.[marinersAway ? 'away' : 'home']?.players || {};
+  // battingOrder is "300" for the 3rd spot, "301" for a sub in that spot.
+  const spotOf = id => {
+    const order = Number(players[`ID${id}`]?.battingOrder);
+    return order ? Math.floor(order / 100) - 1 : null;
+  };
+  const calSpot = spotOf(playerId);
+  if (calSpot == null) return null;
+
+  // The Mariners' most recent plate appearance tells us who's due.
+  const last = (feed.liveData?.plays?.allPlays || []).findLast(p => p.about.isTopInning === marinersAway);
+  let dueSpot = 0;
+  if (last) {
+    const lastSpot = spotOf(last.matchup.batter.id);
+    if (lastSpot == null) return null;
+    dueSpot = last.about.isComplete ? (lastSpot + 1) % 9 : lastSpot;
+  }
+
+  const half = feed.liveData?.linescore?.inningState;
+  return {
+    spot: calSpot + 1,
+    battersAhead: (calSpot - dueSpot + 9) % 9,
+    marinersBatting: half === (marinersAway ? 'Top' : 'Bottom'),
+  };
+}
+
 module.exports = {
   findNextGame, getLiveFeed, getSeasonStats,
-  isOver, homeRunsBy, playKey, hitData, boxscorePlayer,
+  isOver, homeRunsBy, playKey, hitData, boxscorePlayer, lineupStatus,
 };
