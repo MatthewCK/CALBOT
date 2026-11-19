@@ -45,7 +45,7 @@ async function checkConnection() {
   if (status !== 'CONNECTED') exitForRestart(`WhatsApp state is ${status}`);
 }
 
-function start({ dataDir, groupChatId, recipientNumbers, onReady }) {
+function start({ dataDir, groupChatId, recipientNumbers }) {
   client = new Client({
     authStrategy: new LocalAuth({ dataPath: path.join(dataDir, '.wwebjs_auth') }),
     puppeteer: { headless: true, args: ['--no-sandbox', '--disable-setuid-sandbox'] },
@@ -65,7 +65,6 @@ function start({ dataDir, groupChatId, recipientNumbers, onReady }) {
     state.qr = null;
     console.log('WhatsApp ready');
     while (pending.length) await deliver(pending.shift());
-    onReady();
   });
   client.on('auth_failure', msg => console.error('WhatsApp auth failure:', msg));
   client.on('disconnected', reason => exitForRestart(`WhatsApp disconnected (${reason})`));

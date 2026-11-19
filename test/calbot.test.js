@@ -111,7 +111,6 @@ test('wager is settled once the season is over', () => {
   assert.strictEqual(noWinner, 0);
 });
 
-test('at-bat result uses MLB event names', () => {
-  const flyout = feed.liveData.plays.allPlays[2];
-  assert.match(messages.atBatResult(flyout, feed), /🔄 CAL'S AT-BAT RESULT: Flyout/);
+test('situation line for the console shows inning and score', () => {
+  assert.strictEqual(messages.situation(feed), 'Colorado Rockies @ Seattle Mariners - Bottom 5 (COL 3 - SEA 7)');
 });

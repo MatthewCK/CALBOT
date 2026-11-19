@@ -1,4 +1,4 @@
-// WhatsApp message text and the season home run wager. Pure functions only.
+// Home run message text and the season home run wager. Pure functions only.
 const { hitData, boxscorePlayer } = require('./mlb');
 
 // Each person's picks for Cal's final regular-season home run total.
@@ -52,16 +52,6 @@ function wagerSection(currentHR, teamGames) {
     `${lines.join('\n')}\n❌ No Winner: ${percent(noWinner)}`;
 }
 
-function statsBlock(stats) {
-  if (!stats) return '';
-  return `🏆 Cal's ${stats.season} Stats:\n   • HR: ${stats.homeRuns}\n   • RBI: ${stats.rbi}\n` +
-    `   • AVG: ${stats.avg}\n   • OPS: ${stats.ops}`;
-}
-
-function statsAndWager(stats) {
-  return stats ? `\n\n${statsBlock(stats)}${wagerSection(stats.homeRuns, stats.teamGames)}` : '';
-}
-
 function matchup(feed) {
   const { away, home } = feed.gameData.teams;
   return `${away.name} @ ${home.name}`;
@@ -112,45 +102,7 @@ function homeRun(play, feed, stats, playerId) {
   return text;
 }
 
-function gameStart(feed, stats) {
-  const time = new Date(feed.gameData.datetime.dateTime).toLocaleTimeString('en-US', {
-    hour: 'numeric', minute: '2-digit', timeZone: 'America/Los_Angeles',
-  });
-  return `⚾🚨 MARINERS GAME STARTED! 🚨⚾\n\n🏟️ ${matchup(feed)}\n📍 ${feed.gameData.venue?.name || ''}\n` +
-    `🕐 ${time} PT${statsAndWager(stats)}\n\n🔍 Monitoring for Cal dingers... ⚾💥`;
-}
-
-function upToBat(feed) {
-  return `⚾🚨 CAL IS UP TO BAT! 🚨⚾\n\n🏟️ ${situation(feed)}\n\n🔍 Monitoring for dinger... ⚾💥`;
-}
-
-function atBatResult(play, feed) {
-  const { result, about } = play;
-  const type = result.eventType || '';
-  const emoji =
-    ['single', 'double', 'triple'].includes(type) ? '🏃‍♂️' :
-    ['walk', 'intent_walk', 'hit_by_pitch'].includes(type) ? '🚶‍♂️' :
-    type.startsWith('strikeout') ? '❌' :
-    result.isOut ? '🔄' : '⚾';
-  let text = `${emoji} CAL'S AT-BAT RESULT: ${result.event || 'At-Bat'} ${emoji}\n\n🏟️ ${situation(feed)}\n📝 ${result.description || ''}`;
-  if (result.rbi) text += `\n🏃‍♂️ ${result.rbi} RBI`;
-  return `${text}\n⚾ Inning: ${about.isTopInning ? 'Top' : 'Bottom'} ${about.inning}`;
-}
-
-function startup(stats) {
-  return `🚨🚨🚨 CAL DINGER BOT IS READY! 🚨🚨🚨\n\n⚾ WhatsApp: ✅ Connected\n` +
-    `📊 MLB API: ${stats ? '✅ Responding' : '⚠️ Not responding'}${statsAndWager(stats)}\n\n🔍 Monitoring for Cal dingers... ⚾💥`;
-}
-
-function healthStatus({ whatsappReady, gamePk, gameStatus, stats, targetCount }) {
-  const time = new Date().toLocaleString('en-US', { timeZone: 'America/Los_Angeles' });
-  return `🏥 CAL DINGER BOT HEALTH STATUS 🏥\n\n⏰ Time: ${time} PT\n` +
-    `📱 WhatsApp: ${whatsappReady ? '✅ Connected' : '❌ Disconnected'}\n` +
-    `🎮 Game Tracking: ${gamePk ? `✅ Game ${gamePk} (${gameStatus || 'starting soon'})` : '❌ No game right now'}\n` +
-    `📊 Sending to: ${targetCount} chat(s)${stats ? `\n\n${statsBlock(stats)}` : ''}`;
-}
-
 module.exports = {
   WAGER_PICKS, wagerOdds, wagerSection,
-  homeRun, gameStart, upToBat, atBatResult, startup, healthStatus,
+  homeRun, situation,
 };

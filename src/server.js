@@ -12,8 +12,6 @@ const PORT = process.env.PORT || 3000;
 const PLAYER_ID = Number(process.env.CAL_RALEIGH_PLAYER_ID || 663728);
 const TEAM_ID = Number(process.env.MARINERS_TEAM_ID || 136);
 const POLL_MS = Number(process.env.POLL_INTERVAL_MS || 15_000);
-const ENHANCED_PA = ['true', '1'].includes(process.env.ENHANCED_PA);
-const STARTUP_SILENTLY = ['true', '1'].includes(process.env.STARTUP_SILENTLY);
 const ADMIN_TOKEN = process.env.ADMIN_TOKEN;
 const GROUP_CHAT_ID = process.env.GROUP_CHAT_ID || '';
 const RECIPIENT_NUMBERS = (process.env.RECIPIENT_NUMBERS || '').split(',').map(s => s.trim()).filter(Boolean);
@@ -27,7 +25,7 @@ const ALREADY_SENT_AGE = 10 * MINUTE;  // on first look at a game, older HRs cou
 // --- State ---
 const sentPlays = new Set(readSentFile());
 const finishedGames = new Set();
-let game = null; // the game being watched: { pk, seeded, sawPreview, startAnnounced, calAtBat }
+let game = null; // the game being watched: { pk, seeded, calAtBat }
 let gameStatus = null;
 
 function readSentFile() {
@@ -59,7 +57,7 @@ async function poll() {
       console.log(`Next game ${next.gamePk} starts ${next.gameDate}; checking again in ${Math.round(Math.min(wait, 6 * HOUR) / MINUTE)} min`);
       return Math.min(wait, 6 * HOUR);
     }
-    game = { pk: next.gamePk, seeded: false, sawPreview: false, startAnnounced: false, calAtBat: null };
+    game = { pk: next.gamePk, seeded: false, calAtBat: null };
     console.log(`Watching game ${game.pk}: ${next.teams.away.team.name} @ ${next.teams.home.team.name}`);
   }
 
@@ -87,7 +85,7 @@ async function poll() {
     markSent(key);
   }
 
-  if (ENHANCED_PA) await sendProgressUpdates(feed, status);
+  if (status.abstractGameState === 'Live') logCalAtBats(feed);
 
   if (mlb.isOver(status)) {
     if (status.abstractGameState === 'Final') finishedGames.add(game.pk);
@@ -98,30 +96,20 @@ async function poll() {
   return POLL_MS;
 }
 
-// ENHANCED_PA messages: game start, Cal up to bat, and the result of each at-bat.
-async function sendProgressUpdates(feed, status) {
-  if (status.abstractGameState === 'Preview') {
-    game.sawPreview = true;
-    return;
-  }
-  // Only announce a start we actually saw, so a restart mid-game stays quiet.
-  if (status.abstractGameState === 'Live' && game.sawPreview && !game.startAnnounced) {
-    game.startAnnounced = true;
-    await whatsapp.send(messages.gameStart(feed, await seasonStats()));
-  }
-
+// Diagnostics only (console, never WhatsApp): Cal coming up to bat and how each at-bat ended.
+function logCalAtBats(feed) {
   const { allPlays = [], currentPlay } = feed.liveData.plays;
   if (game.calAtBat != null) {
     const finished = allPlays.find(p => p.about.atBatIndex === game.calAtBat && p.about.isComplete);
     if (finished) {
       game.calAtBat = null;
-      if (finished.result.eventType !== 'home_run') await whatsapp.send(messages.atBatResult(finished, feed));
+      console.log(`Cal at-bat result: ${finished.result.event} - ${finished.result.description}`);
     }
   }
   if (game.calAtBat == null && currentPlay && !currentPlay.about.isComplete &&
       currentPlay.matchup?.batter?.id === PLAYER_ID) {
     game.calAtBat = currentPlay.about.atBatIndex;
-    await whatsapp.send(messages.upToBat(feed));
+    console.log(`Cal up to bat: ${messages.situation(feed)}`);
   }
 }
 
@@ -146,6 +134,7 @@ app.get('/', (req, res) => {
     ok: true,
     whatsappReady: whatsapp.state.ready,
     needsQrScan: Boolean(whatsapp.state.qr),
+    sendingTo: whatsapp.targetCount(),
     watchingGame: game?.pk ?? null,
     gameStatus,
     uptimeSeconds: Math.round(process.uptime()),
@@ -160,7 +149,7 @@ app.get('/qr', async (req, res) => {
   res.send(`<meta http-equiv="refresh" content="15"><p>Scan from WhatsApp &gt; Linked Devices</p><img src="${image}">`);
 });
 
-// Endpoints that send messages need the x-admin-token header to match ADMIN_TOKEN.
+// /test-whatsapp needs the x-admin-token header to match ADMIN_TOKEN.
 function adminOnly(handler) {
   return async (req, res) => {
     if (!ADMIN_TOKEN || req.get('x-admin-token') !== ADMIN_TOKEN) {
@@ -179,17 +168,6 @@ app.post('/test-whatsapp', express.json(), adminOnly(async (req, res) => {
   res.json({ ok: true });
 }));
 
-app.post('/health-status', adminOnly(async (req, res) => {
-  await whatsapp.send(messages.healthStatus({
-    whatsappReady: whatsapp.state.ready,
-    gamePk: game?.pk,
-    gameStatus,
-    stats: await seasonStats(),
-    targetCount: whatsapp.targetCount(),
-  }));
-  res.json({ ok: true });
-}));
-
 // --- Start ---
 process.on('unhandledRejection', err => console.error('Unhandled rejection:', err));
 process.on('uncaughtException', err => {
@@ -197,16 +175,13 @@ process.on('uncaughtException', err => {
   process.exit(1);
 });
 
-console.log(`CALBOT starting: player ${PLAYER_ID}, team ${TEAM_ID}, poll ${POLL_MS / 1000}s, enhanced ${ENHANCED_PA}`);
+console.log(`CALBOT starting: player ${PLAYER_ID}, team ${TEAM_ID}, poll ${POLL_MS / 1000}s`);
 app.listen(PORT, () => console.log(`Listening on :${PORT}`));
 
 whatsapp.start({
   dataDir: DATA_DIR,
   groupChatId: GROUP_CHAT_ID,
   recipientNumbers: RECIPIENT_NUMBERS,
-  onReady: async () => {
-    if (!STARTUP_SILENTLY) await whatsapp.send(messages.startup(await seasonStats()));
-  },
 });
 
 pollForever();
