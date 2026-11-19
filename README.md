@@ -69,7 +69,6 @@ All settings live in `.env` (see [`.env.example`](.env.example)). On Railway or 
 | `RECIPIENT_NUMBERS` | | Phone numbers to message directly: comma-separated, country code, no `+` |
 | `COMMAND` | `!cal` | Status command (not case-sensitive) |
 | `WAGER_PICKS` | off | `Name:pick,pick;Name:pick,...` (see [Wager](#wager)) |
-| `ADMIN_TOKEN` | | Enables `POST /test-whatsapp` |
 | `DATA_DIR` | `.` | Where the WhatsApp login and sent-alert list are stored |
 | `POLL_INTERVAL_MS` | `15000` | How often to check the live game |
 | `PORT` | `3000` | HTTP port |
@@ -131,18 +130,12 @@ It should run anywhere that can run Node and headless Chrome. The service is mea
 
 ## HTTP Endpoints
 
-| Method | Path | Auth | Purpose |
-|---|---|---|---|
-| GET | `/` | none | Health check: WhatsApp status, chats configured, game being watched, uptime |
-| GET | `/qr` | none | WhatsApp login QR code (only shown until linked) |
-| POST | `/test-whatsapp` | `x-admin-token` header | Send a test message (`{"message": "..."}`) |
+| Path | Purpose |
+|---|---|
+| `GET /` | Health check: WhatsApp status, chats configured, game being watched, uptime |
+| `GET /qr` | WhatsApp login QR code (only shown until linked) |
 
-```bash
-curl -X POST http://localhost:3000/test-whatsapp \
-  -H "x-admin-token: $ADMIN_TOKEN" \
-  -H "Content-Type: application/json" \
-  -d '{"message":"Hello from the bot ⚾"}'
-```
+Both are open: the health check shows only status, and the QR code disappears once WhatsApp is linked, so scan it right after you deploy. To test sending, use the status command in the chat.
 
 ## Project Structure
 

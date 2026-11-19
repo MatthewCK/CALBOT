@@ -149,25 +149,6 @@ app.get('/qr', async (req, res) => {
   res.send(`<meta http-equiv="refresh" content="15"><p>Scan from WhatsApp &gt; Linked Devices</p><img src="${image}">`);
 });
 
-// /test-whatsapp needs the x-admin-token header to match ADMIN_TOKEN.
-function adminOnly(handler) {
-  return async (req, res) => {
-    if (!config.adminToken || req.get('x-admin-token') !== config.adminToken) {
-      return res.status(401).json({ ok: false, error: config.adminToken ? 'Missing or wrong x-admin-token header' : 'Set ADMIN_TOKEN to use this endpoint' });
-    }
-    try {
-      await handler(req, res);
-    } catch (err) {
-      res.status(500).json({ ok: false, error: err.message });
-    }
-  };
-}
-
-app.post('/test-whatsapp', express.json(), adminOnly(async (req, res) => {
-  await whatsapp.send(req.body?.message || `🚨🚨🚨 TEST DINGER! 🚨🚨🚨 This is a test from ${NAME} Dinger Bot! ⚾💥🏟️`);
-  res.json({ ok: true });
-}));
-
 // --- Start ---
 process.on('unhandledRejection', err => console.error('Unhandled rejection:', err));
 process.on('uncaughtException', err => {

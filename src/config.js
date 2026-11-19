@@ -37,7 +37,6 @@ module.exports = {
   // Running the service
   port: Number(process.env.PORT || 3000),
   pollMs: Number(process.env.POLL_INTERVAL_MS || 15_000),
-  adminToken: process.env.ADMIN_TOKEN || '',
   dataDir: process.env.DATA_DIR || '.',
 
   parseWagerPicks,
