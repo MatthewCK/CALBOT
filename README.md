@@ -1,28 +1,44 @@
 # CALBOT - Cal Raleigh Home Run Notifier
 
-A WhatsApp bot that automatically notifies your friends when Cal Raleigh hits a home run! 🏟️⚾
+A WhatsApp bot that messages your friends when Cal Raleigh hits a home run. 🏟️⚾
 
-## Features
+## How It Works
 
-- **Real-time monitoring** of Seattle Mariners games
-- **WhatsApp notifications** when Cal Raleigh hits a home run
-- **Rich message formatting** with inning, RBI, exit velocity, and distance
-- **Configurable notification levels** (home runs only or enhanced)
-- **Duplicate prevention** to avoid spam
-- **Railway deployment** ready
+1. **Find the next game:** Checks the MLB schedule for the next Mariners regular-season or postseason game, then sleeps until 5 minutes before first pitch.
+2. **Watch it:** Polls the live game feed every 15 seconds (`POLL_INTERVAL_MS`) until the game is final, postponed or suspended. Then it looks for the next game, including the second game of a doubleheader.
+3. **Spot Cal's home runs:** Any completed play with event type `home_run` and Cal as the batter.
+4. **Send the alert:** Posts a "CAL DINGER!" message with the description, inning, RBIs, exit velocity, launch angle, distance, season HR number, score, Cal's line for the game and the wager update.
+5. **No repeats:** Home runs are tracked by game and play number and saved to `.calbot-sent.json`, so a crash or restart doesn't re-send them. After a redeploy (which wipes that file), home runs that ended more than 10 minutes before the bot first looks at the game are treated as already sent.
+
+The service is meant to run during the season and be shut down by hand in the offseason.
+
+### Wager
+
+Tim, Austin and Matt each picked four possible final regular-season home run totals. The picks live in `WAGER_PICKS` at the top of `src/messages.js`:
+
+| Person | Picks |
+|---|---|
+| Tim | 54, 55, 56, 60 |
+| Austin | 53, 57, 58, 59 |
+| Matt | 61, 62, 63, 64 |
+
+The bot projects the rest of the season at Cal's current pace: his home runs per Mariners game, times the games left. It models the home runs still to come as a Poisson distribution. That means the final total can never fall below his current one, and the odds settle to 100% for the winner once all 162 games are played.
+
+### WhatsApp Connection
+
+The bot uses `whatsapp-web.js`, which runs WhatsApp Web in a hidden Chrome browser. If the connection drops, or a check every 5 minutes finds it isn't connected, the process exits and Railway restarts it. The saved login in `.wwebjs_auth/` (inside `DATA_DIR`) lets it reconnect without scanning again. Messages sent before WhatsApp finishes connecting are held (up to 20) and sent once it's ready.
 
 ## Notification Levels
 
-### Default Mode (ENHANCED_PA=false or omitted)
-- ✅ Bot initialization message
-- ✅ Home run notifications only
+### Default (`ENHANCED_PA` unset or `false`)
+- Startup message (skip it with `STARTUP_SILENTLY=true`)
+- Home run alerts
 
-### Enhanced Mode (ENHANCED_PA=true)
-- ✅ Bot initialization message
-- ✅ Game start notifications
-- ✅ Cal up-to-bat alerts
-- ✅ At-bat result messages
-- ✅ Home run notifications
+### Enhanced (`ENHANCED_PA=true`)
+- Everything above, plus:
+- Game start
+- "Cal is up to bat"
+- The result of each of Cal's at-bats
 
 ## Setup
 
@@ -32,108 +48,94 @@ npm install
 ```
 
 ### 2. Configure Environment Variables
-Create a `.env` file with:
+Create a `.env` file:
 ```
 PORT=3000
 
-# WhatsApp Configuration (use one or both)
-# Individual phone numbers (comma-separated, with country code, no +)
+# Where to send messages (use one or both)
+# Phone numbers, comma-separated, with country code, no +
 RECIPIENT_NUMBERS=15551234567,15559876543
-
-# WhatsApp Group Chat ID (get from group info)
-# Example: 120363123456789012@g.us
+# WhatsApp group chat ID, e.g. 120363123456789012@g.us
 GROUP_CHAT_ID=120363123456789012@g.us
 
-# Enhanced plate appearance notifications (optional)
-# Set to true/1 to enable game start, at-bat, and plate appearance alerts
-# Set to false/0 or omit to only send home run notifications
+# Optional features
 ENHANCED_PA=false
+STARTUP_SILENTLY=false
 
-# MLB IDs (already configured)
+# Needed to use the /test-whatsapp and /health-status endpoints
+ADMIN_TOKEN=pick-a-long-random-string
+
+# Folder for the WhatsApp login and sent-HR list (default: current folder)
+DATA_DIR=.
+
+# Defaults shown; usually no need to set these
 CAL_RALEIGH_PLAYER_ID=663728
 MARINERS_TEAM_ID=136
-
-# Polling interval (15 seconds)
 POLL_INTERVAL_MS=15000
 ```
 
-### 3. Start Locally
+### 3. Start
 ```bash
 npm start
 ```
 
-### 4. Get Group Chat ID
-- Add the bot to your WhatsApp group
-- Send a message to the group
-- Check the bot logs to find the group chat ID (format: 120xxxxx@g.us)
-- Copy this ID to your `.env` file
+### 4. Link WhatsApp
+- Open `http://localhost:3000/qr` (or `/qr` on your Railway URL).
+- On your phone: WhatsApp → Settings → Linked Devices → Link a Device, and scan the code.
+- The login is saved, so you only do this once per machine.
 
-### 5. Authenticate WhatsApp
-- Scan the QR code with your WhatsApp mobile app
-- Go to Settings → Linked Devices → Link a Device
-- The service will remember your authentication
+### 5. Get the Group Chat ID
+- Start the bot without `GROUP_CHAT_ID` set.
+- Send a message in the group. The logs show `Message in group chat 120xxxxx@g.us`.
+- Put that ID in `GROUP_CHAT_ID` and restart.
 
 ### 6. Test
 ```bash
 curl -X POST http://localhost:3000/test-whatsapp \
+  -H "x-admin-token: $ADMIN_TOKEN" \
   -H "Content-Type: application/json" \
   -d '{"message":"Test from Cal Dinger Bot! 🏟️⚾"}'
 ```
 
 ## Deployment to Railway
 
-### 1. Push to GitHub
-```bash
-git add .
-git commit -m "Initial Cal Dinger Bot"
-git push origin main
-```
+1. Push to GitHub and create a Railway project from the repo.
+2. Add the environment variables above in the Railway dashboard. Make sure to set `ADMIN_TOKEN` if you want the test endpoints.
+3. Open `/qr` on your Railway URL and scan it.
 
-### 2. Deploy on Railway
-1. Go to [Railway.app](https://railway.app)
-2. Create new project from GitHub
-3. Select your repository
-4. Add environment variables in Railway dashboard:
-   - `RECIPIENT_NUMBERS`: Individual phone numbers (optional)
-   - `GROUP_CHAT_ID`: WhatsApp group chat ID (optional)
-   - `ENHANCED_PA`: true/false for enhanced notifications (optional)
-   - `CAL_RALEIGH_PLAYER_ID`: 663728 (Cal's correct ID)
-   - `POLL_INTERVAL_MS`: 15000 (optional)
+Railway builds with Nixpacks (`.nixpacks.toml`), checks `/` to confirm the service is up, and always restarts it if it exits.
 
-### 3. Authenticate WhatsApp on Railway
-- Check Railway logs for QR code
-- Scan with your phone
-- Service will be ready to monitor games!
-
-## How It Works
-
-1. **Game Detection**: Polls MLB Stats API for today's Mariners games
-2. **Play Monitoring**: Checks live game feed for home run events
-3. **Player Filtering**: Only triggers for Cal Raleigh (ID: 668939)
-4. **WhatsApp Notification**: Sends formatted message to all recipients
-5. **Duplicate Prevention**: Tracks event IDs to avoid spam
-
-## Message Format
-
-```
-CAL DINGER! [Description] • [Inning] • [RBI] RBI • EV [Exit Velocity] mph • LA [Launch Angle]° • [Distance] ft
-```
+**Note:** Railway's disk is wiped on every redeploy, which logs WhatsApp out (you'll need to scan `/qr` again) and clears the list of sent home runs. To keep both, attach a Railway volume (e.g. mounted at `/data`) and set `DATA_DIR=/data`.
 
 ## API Endpoints
 
-- `GET /` - Health check
-- `POST /test-whatsapp` - Send test WhatsApp message
+| Method | Path | Auth | Purpose |
+|---|---|---|---|
+| GET | `/` | none | Health check: WhatsApp status, game being watched, uptime |
+| GET | `/qr` | none | WhatsApp login QR code (only shown until linked) |
+| POST | `/test-whatsapp` | `x-admin-token` header | Send a test message (`{"message": "..."}`) |
+| POST | `/health-status` | `x-admin-token` header | Send a status report to the chat |
+
+## Project Structure
+
+```
+src/server.js      Config, polling loop, HTTP endpoints
+src/mlb.js         MLB Stats API calls and live-feed helpers
+src/messages.js    Message text and the wager odds
+src/whatsapp.js    WhatsApp client and message delivery
+test/              Tests (npm test), using Node's built-in test runner
+```
 
 ## Troubleshooting
 
-- **400 Bad Request**: Normal when no Mariners game today
-- **WhatsApp not ready**: Wait for QR code scan
-- **No messages sent**: Check recipient phone numbers in `.env`
+- **No messages sent:** Check `GROUP_CHAT_ID` / `RECIPIENT_NUMBERS`. With neither set, the bot only logs what it would send.
+- **WhatsApp not ready:** Open `/qr` and scan it.
+- **Bot keeps restarting:** Check the logs for "exiting so Railway restarts the service" to see why.
 
 ## MLB IDs Used
 
-- **Cal Raleigh**: 668939
-- **Seattle Mariners**: 136
+- **Cal Raleigh:** 663728
+- **Seattle Mariners:** 136
 
 ## License
 
