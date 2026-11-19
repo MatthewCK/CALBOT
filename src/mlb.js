@@ -1,4 +1,6 @@
 // MLB Stats API access and live-feed helpers.
+const { timeZone } = require('./config');
+
 const API = 'https://statsapi.mlb.com/api';
 const TRACKED_GAME_TYPES = new Set(['R', 'F', 'D', 'L', 'W']); // regular season + postseason rounds
 
@@ -8,10 +10,9 @@ async function getJson(path) {
   return res.json();
 }
 
-// YYYY-MM-DD in Pacific time, offset by whole days.
-function pacificDate(offsetDays = 0) {
-  return new Date(Date.now() + offsetDays * 86_400_000)
-    .toLocaleDateString('en-CA', { timeZone: 'America/Los_Angeles' });
+// YYYY-MM-DD in TIMEZONE, offset by whole days.
+function localDate(offsetDays = 0) {
+  return new Date(Date.now() + offsetDays * 86_400_000).toLocaleDateString('en-CA', { timeZone });
 }
 
 // True once a game won't produce any more plays today.
@@ -20,10 +21,11 @@ function isOver(status = {}) {
     /Postponed|Cancelled|Suspended/.test(status.detailedState || '');
 }
 
-// Next regular-season or postseason game in the coming 10 days that isn't over.
+// Next regular-season or postseason game that isn't over. Starts from yesterday so a
+// late game still running past midnight (in TIMEZONE) is found after a restart.
 async function findNextGame(teamId, skipGamePks) {
   const data = await getJson(
-    `/v1/schedule?sportId=1&teamId=${teamId}&startDate=${pacificDate()}&endDate=${pacificDate(10)}`
+    `/v1/schedule?sportId=1&teamId=${teamId}&startDate=${localDate(-1)}&endDate=${localDate(10)}`
   );
   const games = (data.dates || []).flatMap(d => d.games || []);
   return games.find(g =>
@@ -78,21 +80,21 @@ function boxscorePlayer(feed, playerId) {
   return teams.away?.players?.[`ID${playerId}`] || teams.home?.players?.[`ID${playerId}`] || null;
 }
 
-// Where Cal is relative to the Mariners' next batter. Returns null if he isn't in the
+// Where the player is relative to his team's next batter. Returns null if he isn't in the
 // lineup (or it isn't posted yet). battersAhead 0 means he's due up now.
 function lineupStatus(feed, playerId, teamId) {
-  const marinersAway = feed.gameData.teams.away.id === teamId;
-  const players = feed.liveData?.boxscore?.teams?.[marinersAway ? 'away' : 'home']?.players || {};
+  const teamIsAway = feed.gameData.teams.away.id === teamId;
+  const players = feed.liveData?.boxscore?.teams?.[teamIsAway ? 'away' : 'home']?.players || {};
   // battingOrder is "300" for the 3rd spot, "301" for a sub in that spot.
   const spotOf = id => {
     const order = Number(players[`ID${id}`]?.battingOrder);
     return order ? Math.floor(order / 100) - 1 : null;
   };
-  const calSpot = spotOf(playerId);
-  if (calSpot == null) return null;
+  const playerSpot = spotOf(playerId);
+  if (playerSpot == null) return null;
 
-  // The Mariners' most recent plate appearance tells us who's due.
-  const last = (feed.liveData?.plays?.allPlays || []).findLast(p => p.about.isTopInning === marinersAway);
+  // The team's most recent plate appearance tells us who's due.
+  const last = (feed.liveData?.plays?.allPlays || []).findLast(p => p.about.isTopInning === teamIsAway);
   let dueSpot = 0;
   if (last) {
     const lastSpot = spotOf(last.matchup.batter.id);
@@ -102,9 +104,9 @@ function lineupStatus(feed, playerId, teamId) {
 
   const half = feed.liveData?.linescore?.inningState;
   return {
-    spot: calSpot + 1,
-    battersAhead: (calSpot - dueSpot + 9) % 9,
-    marinersBatting: half === (marinersAway ? 'Top' : 'Bottom'),
+    spot: playerSpot + 1,
+    battersAhead: (playerSpot - dueSpot + 9) % 9,
+    teamBatting: half === (teamIsAway ? 'Top' : 'Bottom'),
   };
 }
 

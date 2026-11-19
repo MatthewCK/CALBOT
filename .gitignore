@@ -4,6 +4,7 @@ npm-debug.log*
 # Secrets
 .env
 .env.*
+!.env.example
 
 # WhatsApp login and cache
 .wwebjs_auth/

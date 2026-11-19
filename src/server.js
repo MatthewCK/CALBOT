@@ -3,29 +3,21 @@ const fs = require('fs');
 const path = require('path');
 const express = require('express');
 const QRCode = require('qrcode');
+const config = require('./config');
 const mlb = require('./mlb');
 const messages = require('./messages');
 const whatsapp = require('./whatsapp');
 
-// --- Config ---
-const PORT = process.env.PORT || 3000;
-const PLAYER_ID = Number(process.env.CAL_RALEIGH_PLAYER_ID || 663728);
-const TEAM_ID = Number(process.env.MARINERS_TEAM_ID || 136);
-const POLL_MS = Number(process.env.POLL_INTERVAL_MS || 15_000);
-const ADMIN_TOKEN = process.env.ADMIN_TOKEN;
-const GROUP_CHAT_ID = process.env.GROUP_CHAT_ID || '';
-const RECIPIENT_NUMBERS = (process.env.RECIPIENT_NUMBERS || '').split(',').map(s => s.trim()).filter(Boolean);
-
+const { playerId: PLAYER_ID, teamId: TEAM_ID, playerName: NAME } = config;
 const MINUTE = 60_000;
 const HOUR = 60 * MINUTE;
-const DATA_DIR = process.env.DATA_DIR || '.'; // put on a Railway volume to survive redeploys
-const SENT_FILE = path.join(DATA_DIR, '.calbot-sent.json');
+const SENT_FILE = path.join(config.dataDir, '.calbot-sent.json'); // DATA_DIR on a volume survives redeploys
 const ALREADY_SENT_AGE = 10 * MINUTE;  // on first look at a game, older HRs count as already sent
 
 // --- State ---
 const sentPlays = new Set(readSentFile());
 const finishedGames = new Set();
-let game = null; // the game being watched: { pk, seeded, calAtBat, feed }
+let game = null; // the game being watched: { pk, seeded, playerAtBat, feed }
 let gameStatus = null;
 
 function readSentFile() {
@@ -49,7 +41,7 @@ async function poll() {
   if (!game) {
     const next = await mlb.findNextGame(TEAM_ID, finishedGames);
     if (!next) {
-      console.log('No Mariners game in the next 10 days');
+      console.log(`No games for team ${TEAM_ID} in the next 10 days`);
       return 6 * HOUR;
     }
     const wait = new Date(next.gameDate) - 5 * MINUTE - Date.now();
@@ -57,12 +49,12 @@ async function poll() {
       console.log(`Next game ${next.gamePk} starts ${next.gameDate}; checking again in ${Math.round(Math.min(wait, 6 * HOUR) / MINUTE)} min`);
       return Math.min(wait, 6 * HOUR);
     }
-    game = { pk: next.gamePk, seeded: false, calAtBat: null };
+    game = { pk: next.gamePk, seeded: false, playerAtBat: null };
     console.log(`Watching game ${game.pk}: ${next.teams.away.team.name} @ ${next.teams.home.team.name}`);
   }
 
   const feed = await mlb.getLiveFeed(game.pk);
-  game.feed = feed; // latest snapshot, used to answer !cal
+  game.feed = feed; // latest snapshot, used to answer the status command
   const status = feed.gameData.status;
   if (status.detailedState !== gameStatus) console.log(`Game ${game.pk}: ${status.detailedState}`);
   gameStatus = status.detailedState;
@@ -80,13 +72,13 @@ async function poll() {
   for (const play of homeRuns) {
     const key = mlb.playKey(game.pk, play);
     if (sentPlays.has(key)) continue;
-    const text = messages.homeRun(play, feed, await seasonStats(), PLAYER_ID);
-    console.log(`Cal home run in game ${game.pk}:\n${text}`);
+    const text = messages.homeRun(play, feed, await seasonStats());
+    console.log(`${NAME} home run in game ${game.pk}:\n${text}`);
     await whatsapp.send(text);
     markSent(key);
   }
 
-  if (status.abstractGameState === 'Live') logCalAtBats(feed);
+  if (status.abstractGameState === 'Live') logAtBats(feed);
 
   if (mlb.isOver(status)) {
     if (status.abstractGameState === 'Final') finishedGames.add(game.pk);
@@ -94,31 +86,31 @@ async function poll() {
     gameStatus = null;
     return MINUTE; // look for a doubleheader's second game
   }
-  return POLL_MS;
+  return config.pollMs;
 }
 
-// Diagnostics only (console, never WhatsApp): Cal coming up to bat and how each at-bat ended.
-function logCalAtBats(feed) {
+// Diagnostics only (console, never WhatsApp): the player coming up to bat and how each at-bat ended.
+function logAtBats(feed) {
   const { allPlays = [], currentPlay } = feed.liveData.plays;
-  if (game.calAtBat != null) {
-    const finished = allPlays.find(p => p.about.atBatIndex === game.calAtBat && p.about.isComplete);
+  if (game.playerAtBat != null) {
+    const finished = allPlays.find(p => p.about.atBatIndex === game.playerAtBat && p.about.isComplete);
     if (finished) {
-      game.calAtBat = null;
-      console.log(`Cal at-bat result: ${finished.result.event} - ${finished.result.description}`);
+      game.playerAtBat = null;
+      console.log(`${NAME} at-bat result: ${finished.result.event} - ${finished.result.description}`);
     }
   }
-  if (game.calAtBat == null && currentPlay && !currentPlay.about.isComplete &&
+  if (game.playerAtBat == null && currentPlay && !currentPlay.about.isComplete &&
       currentPlay.matchup?.batter?.id === PLAYER_ID) {
-    game.calAtBat = currentPlay.about.atBatIndex;
-    console.log(`Cal up to bat: ${messages.situation(feed)}`);
+    game.playerAtBat = currentPlay.about.atBatIndex;
+    console.log(`${NAME} up to bat: ${messages.situation(feed)}`);
   }
 }
 
-// Reply to "!cal" in the chat: bot is up, plus game and Cal info.
+// Reply to the status command (COMMAND, default !cal): bot is up, plus game and player info.
 async function statusReply() {
   const feed = game?.feed || null;
   const nextGame = feed ? null : await mlb.findNextGame(TEAM_ID, finishedGames).catch(() => null);
-  return messages.status({ feed, nextGame, stats: await seasonStats(), playerId: PLAYER_ID, teamId: TEAM_ID });
+  return messages.status({ feed, nextGame, stats: await seasonStats() });
 }
 
 async function pollForever() {
@@ -160,8 +152,8 @@ app.get('/qr', async (req, res) => {
 // /test-whatsapp needs the x-admin-token header to match ADMIN_TOKEN.
 function adminOnly(handler) {
   return async (req, res) => {
-    if (!ADMIN_TOKEN || req.get('x-admin-token') !== ADMIN_TOKEN) {
-      return res.status(401).json({ ok: false, error: ADMIN_TOKEN ? 'Missing or wrong x-admin-token header' : 'Set ADMIN_TOKEN to use this endpoint' });
+    if (!config.adminToken || req.get('x-admin-token') !== config.adminToken) {
+      return res.status(401).json({ ok: false, error: config.adminToken ? 'Missing or wrong x-admin-token header' : 'Set ADMIN_TOKEN to use this endpoint' });
     }
     try {
       await handler(req, res);
@@ -172,7 +164,7 @@ function adminOnly(handler) {
 }
 
 app.post('/test-whatsapp', express.json(), adminOnly(async (req, res) => {
-  await whatsapp.send(req.body?.message || '🚨🚨🚨 TEST DINGER! 🚨🚨🚨 This is a test from Cal Dinger Bot! ⚾💥🏟️');
+  await whatsapp.send(req.body?.message || `🚨🚨🚨 TEST DINGER! 🚨🚨🚨 This is a test from ${NAME} Dinger Bot! ⚾💥🏟️`);
   res.json({ ok: true });
 }));
 
@@ -183,14 +175,10 @@ process.on('uncaughtException', err => {
   process.exit(1);
 });
 
-console.log(`CALBOT starting: player ${PLAYER_ID}, team ${TEAM_ID}, poll ${POLL_MS / 1000}s`);
-app.listen(PORT, () => console.log(`Listening on :${PORT}`));
+console.log(`CALBOT starting: ${NAME} (player ${PLAYER_ID}), team ${TEAM_ID}, poll ${config.pollMs / 1000}s, ` +
+  `command ${config.command}, wager ${Object.keys(config.wagerPicks).join('/') || 'off'}`);
+app.listen(config.port, () => console.log(`Listening on :${config.port}`));
 
-whatsapp.start({
-  dataDir: DATA_DIR,
-  groupChatId: GROUP_CHAT_ID,
-  recipientNumbers: RECIPIENT_NUMBERS,
-  onStatusRequest: statusReply,
-});
+whatsapp.start({ onStatusRequest: statusReply });
 
 pollForever();

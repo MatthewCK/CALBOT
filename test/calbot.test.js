@@ -1,5 +1,12 @@
 const test = require('node:test');
 const assert = require('node:assert');
+
+// Fixed settings so results don't depend on anyone's .env or shell.
+Object.assign(process.env, {
+  PLAYER_ID: '663728', PLAYER_NAME: 'Cal', TEAM_ID: '136', TIMEZONE: 'America/Los_Angeles', COMMAND: '!cal',
+  WAGER_PICKS: 'Tim:54,55,56,60;Austin:53,57,58,59;Matt:61,62,63,64',
+});
+const { parseWagerPicks } = require('../src/config');
 const mlb = require('../src/mlb');
 const messages = require('../src/messages');
 
@@ -77,7 +84,7 @@ test('isOver covers final, postponed and suspended games', () => {
 });
 
 test('home run message includes Statcast data, live HR count, score and game line', () => {
-  const text = messages.homeRun(calHomer, feed, stats, CAL);
+  const text = messages.homeRun(calHomer, feed, stats);
   assert.match(text, /CAL DINGER!/);
   assert.match(text, /Bottom 5 • 2 RBI/);
   assert.match(text, /EV 107.3 mph • LA 28° • 412 ft/);
@@ -88,7 +95,7 @@ test('home run message includes Statcast data, live HR count, score and game lin
 });
 
 test('home run message works without stats', () => {
-  const text = messages.homeRun(calHomer, feed, null, CAL);
+  const text = messages.homeRun(calHomer, feed, null);
   assert.match(text, /Season HR #60/);
   assert.doesNotMatch(text, /WAGER/);
 });
@@ -131,14 +138,14 @@ function lineupFeed(batterId, { complete = true, inningState = 'Bottom' } = {}) 
 
 test('lineup: on deck, batting now, and next inning', () => {
   // 2nd spot just finished, Cal bats 4th: one batter ahead of him.
-  assert.deepStrictEqual(mlb.lineupStatus(lineupFeed(200), CAL, 136), { spot: 4, battersAhead: 1, marinersBatting: true });
+  assert.deepStrictEqual(mlb.lineupStatus(lineupFeed(200), CAL, 136), { spot: 4, battersAhead: 1, teamBatting: true });
   // Pinch hitter in the 3rd spot is still batting: Cal on deck.
   assert.strictEqual(mlb.lineupStatus(lineupFeed(301, { complete: false }), CAL, 136).battersAhead, 1);
   // 3rd spot finished: Cal is due now.
   assert.strictEqual(mlb.lineupStatus(lineupFeed(301), CAL, 136).battersAhead, 0);
   // Same, but the inning ended: he leads off next time.
   const next = mlb.lineupStatus(lineupFeed(301, { inningState: 'Middle' }), CAL, 136);
-  assert.deepStrictEqual(next, { spot: 4, battersAhead: 0, marinersBatting: false });
+  assert.deepStrictEqual(next, { spot: 4, battersAhead: 0, teamBatting: false });
 });
 
 test('lineup: null when Cal is not in it', () => {
@@ -146,7 +153,7 @@ test('lineup: null when Cal is not in it', () => {
 });
 
 test('!cal reply during a game', () => {
-  const text = messages.status({ feed: lineupFeed(200), stats, playerId: CAL, teamId: 136 });
+  const text = messages.status({ feed: lineupFeed(200), stats });
   assert.match(text, /✅ Online/);
   assert.match(text, /Colorado Rockies @ Seattle Mariners - Bottom 5 \(COL 3 - SEA 7\)/);
   assert.match(text, /Cal today: 2\/3 • 1 HR • 3 RBI/);
@@ -156,10 +163,15 @@ test('!cal reply during a game', () => {
 
 test('!cal reply before the game and between games', () => {
   const preview = { ...feed, gameData: { ...feed.gameData, status: { abstractGameState: 'Preview', detailedState: 'Pre-Game' } } };
-  assert.match(messages.status({ feed: preview, playerId: CAL, teamId: 136 }), /Cal is batting 4th/);
+  assert.match(messages.status({ feed: preview }), /Cal is batting 4th/);
 
   const nextGame = { gameDate: '2026-04-03T02:10:00Z', teams: { away: { team: { name: 'Houston Astros' } }, home: { team: { name: 'Seattle Mariners' } } } };
-  const text = messages.status({ feed: null, nextGame, stats: null, playerId: CAL, teamId: 136 });
-  assert.match(text, /Next game: Houston Astros @ Seattle Mariners\n🕐 Thu, Apr 2, 7:10 PM PT/);
+  const text = messages.status({ feed: null, nextGame, stats: null });
+  assert.match(text, /Next game: Houston Astros @ Seattle Mariners\n🕐 Thu, Apr 2, 7:10 PM PDT/);
   assert.doesNotMatch(text, /WAGER/);
+});
+
+test('WAGER_PICKS parsing', () => {
+  assert.deepStrictEqual(parseWagerPicks('Tim:54,55, 56;Austin : 53;Bad;Empty:;'), { Tim: [54, 55, 56], Austin: [53] });
+  assert.deepStrictEqual(parseWagerPicks(undefined), {});
 });
