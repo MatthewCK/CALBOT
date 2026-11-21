@@ -2,10 +2,57 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "calbot/season_log.schema.json",
   "title": "season_log.json",
-  "description": "PLACEHOLDER: fields to be defined with the model package (roadmap step 3). See contract/README.md.",
+  "description": "Game-by-game stats a run used. One row per team game in schedule order, including games the player sat out (played: false).",
   "type": "object",
-  "required": ["schema"],
+  "required": ["schema", "season", "player", "team", "team_games", "source", "data_hash", "games"],
   "properties": {
-    "schema": { "const": 1 }
-  }
+    "schema": { "const": 1 },
+    "season": { "type": "integer" },
+    "player": {
+      "type": "object",
+      "required": ["id", "name"],
+      "properties": { "id": { "type": "integer" }, "name": { "type": "string" } },
+      "additionalProperties": false
+    },
+    "team": {
+      "type": "object",
+      "required": ["id", "name"],
+      "properties": { "id": { "type": "integer" }, "name": { "type": "string" } },
+      "additionalProperties": false
+    },
+    "team_games": { "type": "integer", "minimum": 1, "description": "Games on the team's regular-season schedule." },
+    "source": {
+      "type": "object",
+      "required": ["game_log_url", "schedule_url", "fetched_at"],
+      "properties": {
+        "game_log_url": { "type": "string" },
+        "schedule_url": { "type": "string" },
+        "fetched_at": { "type": "string", "format": "date-time" }
+      },
+      "additionalProperties": false
+    },
+    "data_hash": { "type": "string", "pattern": "^[0-9a-f]{64}$", "description": "SHA-256 of the games array in canonical JSON. Identifies the data snapshot." },
+    "games": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["team_game", "player_game", "date", "game_pk", "opponent", "home", "final", "played", "pa", "hr", "cum_hr"],
+        "properties": {
+          "team_game": { "type": "integer", "minimum": 1, "description": "1-based position in the team's schedule." },
+          "player_game": { "type": ["integer", "null"], "minimum": 1, "description": "1-based count of games the player has appeared in; null if he sat out." },
+          "date": { "type": "string", "format": "date" },
+          "game_pk": { "type": "integer" },
+          "opponent": { "type": "string" },
+          "home": { "type": "boolean" },
+          "final": { "type": "boolean", "description": "False for games not yet played." },
+          "played": { "type": "boolean" },
+          "pa": { "type": "integer", "minimum": 0 },
+          "hr": { "type": "integer", "minimum": 0 },
+          "cum_hr": { "type": "integer", "minimum": 0 }
+        },
+        "additionalProperties": false
+      }
+    }
+  },
+  "additionalProperties": false
 }

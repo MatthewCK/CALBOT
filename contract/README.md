@@ -2,7 +2,7 @@
 
 The format the model publishes and every consumer (`web/`, `whatsapp/`, the publisher) reads. Consumers depend on this folder, never on `model/` code. Background and reasoning: `../docs/PLAN.md` sections 2–4.
 
-**Status:** schema version 1, draft. The schemas and examples here are placeholders until the model package is built (roadmap step 3).
+**Status:** schema version 1. `latest`, `odds`, `distribution`, `season_log` and `events` have real schemas, and the model's tests validate its outputs against them. `season_of_the_day` comes with roadmap step 5.
 
 ## Layout
 
@@ -62,5 +62,5 @@ Append-only list of things worth announcing: home runs, multi-homer games, recor
 
 ## Folders
 
-- `schema/`: JSON Schema (draft 2020-12) for each file. Placeholders for now; only `latest.schema.json` has real fields.
+- `schema/`: JSON Schema (draft 2020-12) for each file.
 - `examples/`: example files that should validate against the schemas.

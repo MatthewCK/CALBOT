@@ -2,10 +2,69 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "calbot/odds.schema.json",
   "title": "odds.json",
-  "description": "PLACEHOLDER: fields to be defined with the model package (roadmap step 3). See contract/README.md.",
+  "description": "Each bettor's chance to win and the 5th/50th/95th percentiles of the final total, now and after every earlier game.",
   "type": "object",
-  "required": ["schema"],
+  "required": ["schema", "run_id", "model_version", "generated_at", "season", "through_game", "hr", "simulations", "bet", "bettors", "percentiles", "history"],
+  "$defs": {
+    "percentiles": {
+      "type": "object",
+      "required": ["p5", "p50", "p95"],
+      "properties": {
+        "p5": { "type": "integer" },
+        "p50": { "type": "integer" },
+        "p95": { "type": "integer" }
+      },
+      "additionalProperties": false
+    }
+  },
   "properties": {
-    "schema": { "const": 1 }
-  }
+    "schema": { "const": 1 },
+    "run_id": { "type": "string" },
+    "model_version": { "type": "string" },
+    "generated_at": { "type": "string", "format": "date-time" },
+    "season": { "type": "integer" },
+    "through_game": { "type": "integer", "minimum": 0, "description": "Team games completed in this game state." },
+    "hr": { "type": "integer", "minimum": 0, "description": "Home runs so far in this game state." },
+    "simulations": { "type": "integer", "minimum": 1 },
+    "bet": {
+      "type": "object",
+      "required": ["stat", "rule"],
+      "properties": {
+        "stat": { "const": "home_runs" },
+        "rule": { "const": "closest_wins_ties_split" }
+      },
+      "additionalProperties": false
+    },
+    "bettors": {
+      "type": "array",
+      "description": "In the bet config's fixed order. Colors follow the person, so the order never changes.",
+      "items": {
+        "type": "object",
+        "required": ["name", "guess", "win_prob"],
+        "properties": {
+          "name": { "type": "string" },
+          "guess": { "type": "integer" },
+          "win_prob": { "type": "number", "minimum": 0, "maximum": 1 }
+        },
+        "additionalProperties": false
+      }
+    },
+    "percentiles": { "$ref": "#/$defs/percentiles" },
+    "history": {
+      "type": "array",
+      "description": "One entry per game state from 0 through through_game. win_prob is aligned with bettors.",
+      "items": {
+        "type": "object",
+        "required": ["through_game", "hr", "win_prob", "percentiles"],
+        "properties": {
+          "through_game": { "type": "integer", "minimum": 0 },
+          "hr": { "type": "integer", "minimum": 0 },
+          "win_prob": { "type": "array", "items": { "type": "number", "minimum": 0, "maximum": 1 } },
+          "percentiles": { "$ref": "#/$defs/percentiles" }
+        },
+        "additionalProperties": false
+      }
+    }
+  },
+  "additionalProperties": false
 }

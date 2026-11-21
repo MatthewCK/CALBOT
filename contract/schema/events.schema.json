@@ -2,10 +2,46 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "calbot/events.schema.json",
   "title": "events.json",
-  "description": "PLACEHOLDER: fields to be defined with the model package (roadmap step 3). See contract/README.md.",
+  "description": "Append-only list of things worth announcing. ids only increase, and an event never changes once published.",
   "type": "object",
-  "required": ["schema"],
+  "required": ["schema", "last_event_id", "events"],
   "properties": {
-    "schema": { "const": 1 }
-  }
+    "schema": { "const": 1 },
+    "last_event_id": { "type": "integer", "minimum": 0 },
+    "events": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["id", "key", "type", "season", "team_game", "date", "run_id"],
+        "properties": {
+          "id": { "type": "integer", "minimum": 1 },
+          "key": { "type": "string", "description": "Stable identity, so a rerun never publishes the same event twice." },
+          "type": { "enum": ["home_run", "multi_homer", "record", "lead_change"] },
+          "season": { "type": "integer" },
+          "team_game": { "type": "integer", "minimum": 1 },
+          "date": { "type": "string", "format": "date" },
+          "run_id": { "type": "string", "description": "The run that first published this event." },
+          "hr_in_game": { "type": "integer", "minimum": 1, "description": "home_run and multi_homer." },
+          "season_total": { "type": "integer", "minimum": 0, "description": "home_run, multi_homer and record." },
+          "record": {
+            "type": "object",
+            "description": "record: the mark that was reached or passed.",
+            "required": ["id", "label", "mark", "trigger"],
+            "properties": {
+              "id": { "type": "string" },
+              "label": { "type": "string" },
+              "mark": { "type": "integer" },
+              "trigger": { "enum": ["reach", "pass"] }
+            },
+            "additionalProperties": false
+          },
+          "leader": { "type": "string", "description": "lead_change: the new favorite." },
+          "previous_leader": { "type": "string", "description": "lead_change: the old favorite." },
+          "win_prob": { "type": "number", "minimum": 0, "maximum": 1, "description": "lead_change: the new favorite's chance after this game." }
+        },
+        "additionalProperties": false
+      }
+    }
+  },
+  "additionalProperties": false
 }

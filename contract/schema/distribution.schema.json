@@ -2,10 +2,35 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "calbot/distribution.schema.json",
   "title": "distribution.json",
-  "description": "PLACEHOLDER: fields to be defined with the model package (roadmap step 3). See contract/README.md.",
+  "description": "Simulated final totals as a histogram: probs[i] is the share of simulations ending on start + i home runs. Totals outside the list have probability 0.",
   "type": "object",
-  "required": ["schema"],
+  "required": ["schema", "run_id", "model_version", "season", "through_game", "simulations", "start", "probs", "history"],
+  "$defs": {
+    "hist": {
+      "type": "object",
+      "required": ["through_game", "start", "probs"],
+      "properties": {
+        "through_game": { "type": "integer", "minimum": 0 },
+        "start": { "type": "integer", "minimum": 0 },
+        "probs": { "type": "array", "items": { "type": "number", "minimum": 0, "maximum": 1 } }
+      },
+      "additionalProperties": false
+    }
+  },
   "properties": {
-    "schema": { "const": 1 }
-  }
+    "schema": { "const": 1 },
+    "run_id": { "type": "string" },
+    "model_version": { "type": "string" },
+    "season": { "type": "integer" },
+    "through_game": { "type": "integer", "minimum": 0 },
+    "simulations": { "type": "integer", "minimum": 1 },
+    "start": { "type": "integer", "minimum": 0 },
+    "probs": { "type": "array", "items": { "type": "number", "minimum": 0, "maximum": 1 } },
+    "history": {
+      "type": "array",
+      "description": "One histogram per game state from 0 through through_game.",
+      "items": { "$ref": "#/$defs/hist" }
+    }
+  },
+  "additionalProperties": false
 }
