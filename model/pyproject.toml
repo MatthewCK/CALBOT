@@ -1,0 +1,23 @@
+[project]
+name = "calbot-model"
+version = "0.0.0"
+description = "CALBOT Model: Cal Raleigh home run projections and bet tracking. Publishes the outputs described in ../contract/."
+readme = "CLAUDE.md"
+requires-python = ">=3.11"
+dependencies = []
+
+[project.optional-dependencies]
+dev = ["pytest"]
+
+[project.scripts]
+calbot-model = "calbot_model.cli:main"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/calbot_model"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
