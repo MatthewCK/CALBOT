@@ -1,0 +1,23 @@
+node_modules/
+npm-debug.log*
+
+# Secrets
+.env
+.env.*
+!.env.example
+
+# WhatsApp login and cache
+.wwebjs_auth/
+.wwebjs_cache/
+
+# Home runs already announced (runtime state)
+.calbot-sent.json
+
+# Local Claude Code settings
+.claude/settings.local.json
+
+# Editors / OS
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
