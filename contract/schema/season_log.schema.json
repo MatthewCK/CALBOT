@@ -1,0 +1,11 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "calbot/season_log.schema.json",
+  "title": "season_log.json",
+  "description": "PLACEHOLDER: fields to be defined with the model package (roadmap step 3). See contract/README.md.",
+  "type": "object",
+  "required": ["schema"],
+  "properties": {
+    "schema": { "const": 1 }
+  }
+}
