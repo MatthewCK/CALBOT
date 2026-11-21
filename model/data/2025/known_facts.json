@@ -1,0 +1,14 @@
+{
+  "note": "Facts from reporting on Cal Raleigh's 2025 season, checked against the MLB API data. 'player_game' counts games he played, not team games (he sat out 3 Mariners games).",
+  "checks": [
+    { "type": "season_total", "hr": 60 },
+    { "type": "games_played", "games": 159 },
+    { "type": "first_hr", "date": "2025-03-31", "player_game": 5 },
+    { "type": "through_player_game", "player_game": 63, "cum_hr": 26 },
+    { "type": "through_player_game", "player_game": 77, "cum_hr": 32 },
+    { "type": "through_date", "date": "2025-07-13", "cum_hr": 38, "note": "All-Star break" },
+    { "type": "on_date", "date": "2025-08-24", "hr": 2, "cum_hr": 49, "note": "48 and 49" },
+    { "type": "on_date", "date": "2025-09-24", "hr": 2, "cum_hr": 60, "note": "59 and 60" },
+    { "type": "prior", "season": 2024, "hr": 34, "games_played": 153, "team_games": 162 }
+  ]
+}

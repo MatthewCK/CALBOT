@@ -1,13 +1,13 @@
 [project]
 name = "calbot-model"
-version = "0.0.0"
+version = "0.1.0"
 description = "CALBOT Model: Cal Raleigh home run projections and bet tracking. Publishes the outputs described in ../contract/."
 readme = "CLAUDE.md"
 requires-python = ">=3.11"
-dependencies = []
+dependencies = ["numpy>=2"]
 
 [project.optional-dependencies]
-dev = ["pytest"]
+dev = ["pytest", "jsonschema"]
 
 [project.scripts]
 calbot-model = "calbot_model.cli:main"

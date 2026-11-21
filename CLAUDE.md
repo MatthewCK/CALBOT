@@ -10,7 +10,7 @@ One git repo, one folder per project. Each folder has its own `CLAUDE.md` with t
 
 | Folder | What it is | Language | State |
 |---|---|---|---|
-| `model/` | CALBOT Model: data collection, simulations, bet tracking, event detection; publishes outputs | Python | Empty skeleton |
+| `model/` | CALBOT Model: data collection, simulations, bet tracking, event detection; publishes outputs | Python | v0.1: real 2025 data, Lite model, outputs |
 | `contract/` | The output contract every consumer reads (PLAN.md section 3) | JSON Schema | Placeholders |
 | `web/` | CALBOT Web: the interactive D3 site | HTML/CSS/JS + D3 | Prototype in `web/prototype/` |
 | `whatsapp/` | CALBOT WhatsApp: the group-chat bot | Node | Working, deployed on Railway |
@@ -34,7 +34,7 @@ One git repo, one folder per project. Each folder has its own `CLAUDE.md` with t
 - A home-run rate per game with a Gamma prior from his 2024 rate (34 HR in 153 games), weighted as 150 games of evidence, updated after every game.
 - Each simulation draws a rate from the posterior, then plays out the remaining games as Poisson draws. 20,000 simulations per game state.
 - The bet: closest guess to the final total wins; ties split.
-- Today this lives in `web/prototype/build_data.py`. Roadmap step 3 moves it into `model/`.
+- Now in `model/` (v0.1), which also models days off. The prototype copy in `web/prototype/build_data.py` stays until roadmap step 4.
 - Later idea: FLIPR-style Lite / Classic / Deluxe versions with a toggle on every chart.
 
 ## The prototype data is partly made up
@@ -44,9 +44,9 @@ The MLB API was blocked when the prototype was built, so `web/prototype/season.j
 - Approximate: which game each other home run fell on, and the game dates.
 - Invented: the five bettors and guesses (Dad 29, Tori 34, Big Mike 38, Nguyen 43, Me 47). The real names and guesses come from the owner.
 
-**First job: replace it with the real game log** from
+**The real game log is now in `model/data/2025/`**, fetched from
 `https://statsapi.mlb.com/api/v1/people/663728/stats?stats=gameLog&season=2025&group=hitting`
-(663728 is Cal Raleigh). Check that the total is 60 and the milestones above line up.
+(663728 is Cal Raleigh). It totals 60 in 159 games and every milestone above lines up (`model/data/2025/known_facts.json`). The milestone game numbers count his games; he sat out 3 Mariners games. `web/prototype/season.json` still has the approximate data until the web reads model outputs (roadmap step 4).
 
 ## Where it's headed
 

@@ -1,0 +1,15 @@
+{
+  "season": 2025,
+  "player_id": 663728,
+  "team_id": 136,
+  "stat": "home_runs",
+  "rule": "closest_wins_ties_split",
+  "note": "Stand-in bettors from the prototype. Roadmap step 2 replaces them with the real group.",
+  "bettors": [
+    { "name": "Dad", "guess": 29 },
+    { "name": "Tori", "guess": 34 },
+    { "name": "Big Mike", "guess": 38 },
+    { "name": "Nguyen", "guess": 43 },
+    { "name": "Me", "guess": 47 }
+  ]
+}

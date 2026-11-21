@@ -1,0 +1,10 @@
+{
+  "note": "Marks worth announcing. trigger 'pass' fires when the total goes above mark; 'reach' fires when it gets to mark.",
+  "records": [
+    { "id": "perez_catcher", "label": "Salvador Perez's catcher record (48, 2021)", "mark": 48, "trigger": "pass" },
+    { "id": "mantle_switch", "label": "Mickey Mantle's switch-hitter record (54, 1961)", "mark": 54, "trigger": "pass" },
+    { "id": "griffey_mariners", "label": "Ken Griffey Jr.'s Mariners record (56, 1997 and 1998)", "mark": 56, "trigger": "pass" },
+    { "id": "sixty_club", "label": "The 60-homer club", "mark": 60, "trigger": "reach" },
+    { "id": "judge_al", "label": "Aaron Judge's AL record (62, 2022)", "mark": 62, "trigger": "pass" }
+  ]
+}

@@ -1,0 +1,7 @@
+{
+ "season": 2024,
+ "hr": 34,
+ "games_played": 153,
+ "team_games": 162,
+ "source": "https://statsapi.mlb.com/api/v1/people/663728/stats?stats=season&season=2024&group=hitting"
+}

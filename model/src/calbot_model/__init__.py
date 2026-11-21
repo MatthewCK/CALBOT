@@ -1,3 +1,3 @@
-"""CALBOT Model. No model code yet; see ../../CLAUDE.md."""
+"""CALBOT Model: Cal Raleigh home run projections and bet tracking. See ../../CLAUDE.md."""
 
-__version__ = "0.0.0"
+__version__ = "0.1.0"
