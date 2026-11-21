@@ -1,0 +1,41 @@
+# ---- OS / editors ----
+.DS_Store
+Thumbs.db
+desktop.ini
+*.swp
+*~
+.vscode/
+.idea/
+
+# ---- Secrets ----
+.env
+.env.*
+!.env.example
+
+# ---- Node (whatsapp/) ----
+node_modules/
+npm-debug.log*
+yarn-error.log*
+
+# ---- Python (model/, web/ build scripts) ----
+__pycache__/
+*.py[cod]
+*.egg-info/
+.eggs/
+build/
+dist/
+.venv/
+venv/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+.ipynb_checkpoints/
+
+# ---- Model outputs (generated; published elsewhere) ----
+/outputs/
+/model/outputs/
+
+# ---- Claude Code local settings ----
+.claude/settings.local.json
