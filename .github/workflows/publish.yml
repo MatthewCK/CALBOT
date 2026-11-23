@@ -1,13 +1,18 @@
 name: Publish
 
 on:
-  workflow_dispatch:        # adds a "Run workflow" button in the Actions tab
+  workflow_dispatch:
+
+permissions:
+  contents: read     # read the repo
+  pages: write       # deploy to Pages
+  id-token: write    # prove to Pages the deploy came from this repo's workflow
 
 jobs:
-  publish:
-    runs-on: ubuntu-latest  # a fresh Linux VM, thrown away after each run
+  build:
+    runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v5 
+      - uses: actions/checkout@v5
       - uses: actions/setup-python@v6
         with:
           python-version: "3.13"
@@ -15,7 +20,22 @@ jobs:
         run: pip install -e ./model
       - name: Run model
         run: calbot-model run --season 2025 --out site-data
-      - uses: actions/upload-artifact@v4     # temporary, so you can inspect the output
+      - name: Assemble site
+        run: |
+          mkdir _site
+          cp -r web/* _site/
+          cp -r site-data _site/data
+          rm -f _site/CLAUDE.md
+      - uses: actions/upload-pages-artifact@v4
         with:
-          name: outputs
-          path: site-data
+          path: _site
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deploy.outputs.page_url }}
+    steps:
+      - id: deploy
+        uses: actions/deploy-pages@v4
