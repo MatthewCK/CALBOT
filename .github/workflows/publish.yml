@@ -4,15 +4,23 @@ on:
   workflow_dispatch:
 
 permissions:
-  contents: read     # read the repo
-  pages: write       # deploy to Pages
-  id-token: write    # prove to Pages the deploy came from this repo's workflow
+  contents: write    # now also push to the data branch
+  pages: write
+  id-token: write
+
+concurrency:
+  group: publish
+  cancel-in-progress: false   # queue a second run instead of letting two push at once
 
 jobs:
   build:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v5            # main, into the workspace root
+      - uses: actions/checkout@v5            # data, into ./site-data
+        with:
+          ref: data
+          path: site-data
       - uses: actions/setup-python@v6
         with:
           python-version: "3.13"
@@ -20,12 +28,20 @@ jobs:
         run: pip install -e ./model
       - name: Run model
         run: calbot-model run --season 2025 --out site-data
+      - name: Commit outputs
+        working-directory: site-data
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898283+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git commit -m "data: Publish run $(jq -r .run_id latest.json)"
+          git push
       - name: Assemble site
         run: |
-          mkdir _site
+          mkdir -p _site/data
           cp -r web/* _site/
-          cp -r site-data _site/data
           rm -f _site/CLAUDE.md
+          rsync -a --exclude .git site-data/ _site/data/
       - uses: actions/upload-pages-artifact@v4
         with:
           path: _site
