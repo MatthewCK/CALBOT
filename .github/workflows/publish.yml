@@ -7,5 +7,14 @@ jobs:
   publish:
     runs-on: ubuntu-latest  # a fresh Linux VM, thrown away after each run
     steps:
-      - uses: actions/checkout@v5   # copies your repo onto the VM
-      - run: ls -la && python3 --version
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.13"
+      - name: Install model
+        run: pip install ./model
+      - name: Run model
+        run: calbot-model run --season 2025 --out site-data
+      - uses: actions/upload-artifact@v4     # temporary, so you can inspect the output
+        with:
+          name: outputs
+          path: site-data
