@@ -39,3 +39,6 @@ htmlcov/
 
 # ---- Claude Code local settings ----
 .claude/settings.local.json
+
+# ---- Web: local copy of model outputs (calbot-model run --out web/data) ----
+/web/data/

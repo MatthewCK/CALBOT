@@ -12,7 +12,7 @@ One git repo, one folder per project. Each folder has its own `CLAUDE.md` with t
 |---|---|---|---|
 | `model/` | CALBOT Model: data collection, simulations, bet tracking, event detection; publishes outputs | Python | v0.1: real 2025 data, Lite model, outputs |
 | `contract/` | The output contract every consumer reads (PLAN.md section 3) | JSON Schema | Placeholders |
-| `web/` | CALBOT Web: the interactive D3 site | HTML/CSS/JS + D3 | Prototype in `web/prototype/` |
+| `web/` | CALBOT Web: the interactive D3 site | HTML/CSS/JS + D3 | Reads model outputs (roadmap step 4 done) |
 | `whatsapp/` | CALBOT WhatsApp: the group-chat bot | Node | Working, deployed on Railway |
 | `docs/` | `PLAN.md` | | |
 
@@ -29,30 +29,30 @@ One git repo, one folder per project. Each folder has its own `CLAUDE.md` with t
 - Readers: baseball and data people who enjoy a model they can play with.
 - Hiring reviewers at Silver Bulletin. The job posting stresses: working interactives, model output that flows into the site automatically, checking that published numbers are correct, accurate and appealing data visualizations, working within Substack's limits (web, email and app), and using AI tools with real understanding ("not just a vibecoder").
 
-## The model (as of the prototype)
+## The model
 
 - A home-run rate per game with a Gamma prior from his 2024 rate (34 HR in 153 games), weighted as 150 games of evidence, updated after every game.
 - Each simulation draws a rate from the posterior, then plays out the remaining games as Poisson draws. 20,000 simulations per game state.
 - The bet: closest guess to the final total wins; ties split.
-- Now in `model/` (v0.1), which also models days off. The prototype copy in `web/prototype/build_data.py` stays until roadmap step 4.
+- Lives in `model/` (v0.1), which also models days off. The prototype's copy (`web/prototype/build_data.py`) was removed with roadmap step 4; it's in git history.
 - Later idea: FLIPR-style Lite / Classic / Deluxe versions with a toggle on every chart.
 
-## The prototype data is partly made up
+## Data: the prototype's was partly made up, the real log replaced it
 
-The MLB API was blocked when the prototype was built, so `web/prototype/season.json` is approximate:
+The MLB API was blocked when the prototype was built, so its data (`web/prototype/season.json`, now only in git history) was approximate:
 - Real: monthly totals and milestones (first HR on Mar 31 in game 5; 26 through game 63; 32 through game 77; 38 at the All-Star break; 48 and 49 on Aug 24; 59 and 60 on Sep 24; 60 final).
 - Approximate: which game each other home run fell on, and the game dates.
 - Invented: the five bettors and guesses (Dad 29, Tori 34, Big Mike 38, Nguyen 43, Me 47). The real names and guesses come from the owner.
 
 **The real game log is now in `model/data/2025/`**, fetched from
 `https://statsapi.mlb.com/api/v1/people/663728/stats?stats=gameLog&season=2025&group=hitting`
-(663728 is Cal Raleigh). It totals 60 in 159 games and every milestone above lines up (`model/data/2025/known_facts.json`). The milestone game numbers count his games; he sat out 3 Mariners games. `web/prototype/season.json` still has the approximate data until the web reads model outputs (roadmap step 4).
+(663728 is Cal Raleigh). It totals 60 in 159 games and every milestone above lines up (`model/data/2025/known_facts.json`). The milestone game numbers count his games; he sat out 3 Mariners games. The web now reads the model's outputs, so every page number comes from this log. The bettors are still the stand-ins (roadmap step 2).
 
 ## Where it's headed
 
-Roadmap (PLAN.md section 10): real data, real bet, model package, web from outputs, season of the day, publisher + Substack, bot migration, apply, Opening Day 2027 (late March) live.
+Roadmap (PLAN.md section 10): real data, real bet, model package, web from outputs, deploy (GitHub Actions + Pages, section 12), season of the day, publisher + Substack, bot migration, apply, Opening Day 2027 (late March) live.
 
-Stack: Python for the model and data, HTML/CSS/JS with D3 for the front end (no heavy framework), Git with clean commits. Later: BigQuery + SQL, GitHub Actions then Cloud Run for scheduling, Datawrapper for Substack charts.
+Stack: Python for the model and data, HTML/CSS/JS with D3 for the front end (no heavy framework), Git with clean commits. Deployment: GitHub Actions runs the model and deploys site + outputs to GitHub Pages; the bot stays on Railway (PLAN.md section 12). Next: BigQuery (free tier) + SQL for run history, Datawrapper for Substack charts.
 
 ## Working notes
 

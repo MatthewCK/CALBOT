@@ -4,16 +4,40 @@ The interactive site. Plain HTML/CSS/JS with D3 v7; no heavy framework. See `../
 
 ## What's here
 
-`prototype/` is the first draft, built in a Claude chat and published as a private claude.ai page called "CALBOT: Sixty".
+Static files, no build step. ES modules, so serve over HTTP (not `file://`).
 
-- `prototype/template.html`: the page with a `__DATA__` placeholder.
-- `prototype/index.html`: the built single-file page (D3 v7 from cdnjs, Google Fonts, `season.json` inlined in place of `__DATA__`).
-- `prototype/build_data.py`: builds `season.json` (series, odds, simulated distributions). Run it from inside `prototype/`; it writes `season.json` to the current folder. Needs `numpy`.
-- `prototype/season.json`: **placeholder data** (see the root `CLAUDE.md`).
+```
+index.html        the page; <meta name="calbot-data"> says where the outputs live (default data/)
+css/calbot.css    all styles; colors and fonts as in the design rules below
+js/data.js        follows the contract: latest.json (no-cache) -> runs/<run_id>/ files -> events.json;
+                  refuses unknown schema numbers; checks the numbers add up (D.problems)
+js/app.js         the charts and text; one slider (game state 0..through_game) drives everything
+data/             local copy of model outputs, gitignored
+```
 
-The step that inlines `season.json` into `template.html` to make `index.html` isn't in the repo yet; it was done in the chat. Add a small build script before changing the data.
+The first draft (`prototype/`, built in a Claude chat with partly made-up data) was removed at roadmap step 4; see git history.
 
-Roadmap step 4 turns this into proper project files that fetch `latest.json` and the run files described in `../contract/` instead of inlining data. Until then, don't restructure the prototype beyond what a task needs.
+### Run it locally
+
+```
+# from the repo root: publish a model run into web/data/, then serve web/
+model/.venv/Scripts/calbot-model run --season 2025 --out web/data
+python -m http.server 8765 --directory web
+```
+
+`.claude/launch.json` has the same server as "web". `?data=<url>` overrides where the page looks for outputs.
+
+### How the page uses the outputs
+
+- The x-axis is **team games** (162), as in the season log. He sat out 3 (ticks on the season chart); "his game" in the table and caption counts only games he played.
+- The slider runs 0..`through_game` of the latest run, so a live season just has a shorter slider.
+- The CALBOT chat message is built from `events.json` for that game (home runs, multi-homer games, records, lead changes), the same events the bot announces.
+- "Pull a random season" draws a final total from the run's distribution for that game state; only the game-by-game path to it is random filler, and the page says so. No simulation code in the site.
+- The season chart's wedge is the run's `percentiles` for that game state: p5 to p95 of simulated final totals (not a standard deviation), with a dashed line to p50. The model only projects the final total, so the wedge is a straight guide from the current game; the numbers at its right edge are the model's, and the sentence under the chart says them in words.
+- Time axes are labeled by month (March folds into April); the slider and readouts still count team games.
+- The record lines (48, 54, 56, 60, 62) are display constants matching `model/config/records.json`.
+- If the season isn't complete, the page re-checks `latest.json` every 5 minutes and shows a "newer run" banner instead of redrawing.
+- `window.CALBOT` holds the shaped data, for checking the page against the source in the console.
 
 ## Design rules (keep these unless the owner says otherwise)
 

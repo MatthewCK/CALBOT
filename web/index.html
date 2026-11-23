@@ -1,0 +1,112 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>CALBOT: Sixty</title>
+<meta name="description" content="Cal Raleigh's 2025 season, one home run at a time, and the group-chat bet on his final total.">
+<!-- Where the model's outputs live (latest.json, runs/, events.json). Relative to this page. -->
+<meta name="calbot-data" content="data/">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Big+Shoulders+Display:wght@500;700;900&family=Big+Shoulders+Text:wght@500;700&family=Newsreader:ital,opsz,wght@0,6..72,400;0,6..72,600;1,6..72,400&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="css/calbot.css">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/d3/7.8.5/d3.min.js"></script>
+<script type="module" src="js/app.js"></script>
+</head>
+<body>
+<div class="wrap">
+  <header class="mast"><b>CALBOT</b><span>Cumulative Accounting of Long Balls, Over Time</span></header>
+  <div id="alerts"></div>
+
+  <div class="hero">
+    <div>
+      <p class="count" id="count" aria-live="polite">&nbsp;</p>
+      <p class="count-cap" id="countCap">home runs<span>loading the model&rsquo;s latest run</span></p>
+    </div>
+    <div>
+      <h1>The year a catcher broke the group chat</h1>
+      <p class="dek">Cal Raleigh&rsquo;s <span data-f="season">2025</span>, one home run at a time, and the preseason bet <span data-f="nBettors">five</span> friends made on it. Nobody guessed higher than <span data-f="maxGuess">47</span>. Drag across the chart or press Play to watch it happen again.</p>
+    </div>
+  </div>
+
+  <ul class="key" aria-label="How to read the season chart">
+    <li><svg width="26" height="12" aria-hidden="true"><path d="M1 10H9V6H17V2H25" fill="none" stroke="#FFD23F" stroke-width="3"/></svg>His home runs so far</li>
+    <li><svg width="26" height="12" aria-hidden="true"><path d="M1 6H25" stroke="#FFD23F" stroke-width="1.5" stroke-dasharray="3 4"/></svg>The model&rsquo;s median final total</li>
+    <li><svg width="26" height="12" aria-hidden="true"><path d="M1 6L25 1V11Z" fill="#FFD23F" fill-opacity=".2"/></svg>Middle 90% of simulated finishes</li>
+    <li><svg width="26" height="12" aria-hidden="true"><path d="M1 6H25" stroke="#FFD23F" stroke-opacity=".3" stroke-width="2"/></svg>What actually happened next</li>
+    <li><svg width="10" height="12" aria-hidden="true"><path d="M5 2V12" stroke="#7A9CA4" stroke-width="2"/></svg>A game he sat out</li>
+  </ul>
+  <div class="chart-hero" id="hero"></div>
+  <p class="hero-read" id="heroRead" aria-live="polite"></p>
+  <p class="note hero-note">The band isn&rsquo;t a standard deviation. It runs from the 5th to the 95th percentile of the simulated final totals, so one simulated season in twenty finishes above it and one in twenty below. The model only projects the final total; the straight wedge from the current game is a guide to the eye, and the numbers at its right edge are the model&rsquo;s.</p>
+
+  <section id="bet">
+    <div class="two">
+      <div class="prose">
+        <h2><span data-f="nBettorsCap">Five</span> guesses, one winner</h2>
+        <p>In March, the group chat put money on Cal&rsquo;s final home run total. Closest guess takes the pot. He&rsquo;d hit 34 the year before, so the guesses clustered there, with one loud exception.</p>
+        <p>CALBOT watched every game and reran the odds after each one by simulating the rest of the season <span data-f="sims">20,000</span> times. Here&rsquo;s what it would have said at the point you&rsquo;ve picked.</p>
+        <div class="chat" aria-live="polite">
+          <div class="who">CALBOT</div>
+          <p class="msg" id="chatMsg"></p>
+          <div class="ts" id="chatTs"></div>
+        </div>
+      </div>
+      <div>
+        <div class="guesses" id="guesses"></div>
+        <div class="panel"><p class="legend-note">Chance of winning the bet, after each game</p><div id="odds"></div></div>
+      </div>
+    </div>
+  </section>
+
+  <section id="ending">
+    <div class="two">
+      <div>
+        <div class="panel"><p class="legend-note" id="histNote"></p><div id="hist"></div></div>
+      </div>
+      <div class="prose">
+        <h2>Where it could still end</h2>
+        <p>Each bar is a possible final total, sized by how often it came up in the simulations. Its color says whose guess would be closest if the season ended there, so you can see each friend&rsquo;s territory shrink or grow.</p>
+        <p>Early on, the model leans on Cal&rsquo;s past season and spreads its bets wide. By June, his pace has taken over and the bars march off to the right, past everyone except one.</p>
+        <p class="note" id="actualNote">The yellow line marks where he actually finished. The model didn&rsquo;t get to see it.</p>
+      </div>
+    </div>
+  </section>
+
+  <section id="sim">
+    <div class="two">
+      <div class="prose">
+        <h2>Pull a random season</h2>
+        <p>The odds are just a count of simulated seasons. Pull one to see what the model was imagining from the game you&rsquo;ve picked. Most look ordinary; a few are wild, and that&rsquo;s the point. Weird things happen, and 2025 was one of them.</p>
+        <p><button id="pull">Pull a season</button> <button class="ghost" id="clear">Clear</button></p>
+        <p class="sim-out" id="simOut" aria-live="polite">Pick a game with the slider below, then pull a season.</p>
+        <p class="note">The final total is drawn from the model&rsquo;s own simulated totals for that game. The game-by-game path to it is filled in at random, just to draw the picture.</p>
+      </div>
+      <div class="panel"><p class="legend-note">Actual season so far in yellow, simulated rest of season in white</p><div id="simchart"></div></div>
+    </div>
+    <details>
+      <summary>See every home run game as a table</summary>
+      <table id="tbl"><thead><tr><th class="num">Team game</th><th class="num">His game</th><th>Date</th><th>Opponent</th><th class="num">HR</th><th class="num">Season total</th></tr></thead><tbody></tbody></table>
+    </details>
+  </section>
+
+  <footer>
+    <div class="prose">
+      <p><b style="color:var(--ink-2)">About the data.</b> Cal&rsquo;s game log and the Mariners&rsquo; schedule come from the <a id="srcLink" href="https://statsapi.mlb.com/">MLB Stats API</a>. The charts count Mariners games, so the three games he sat out (marked on the season chart) are on the axis too; &ldquo;his game&rdquo; in the table counts only games he played. Every number on this page is read from the CALBOT model&rsquo;s published outputs, and the page checks that they add up before drawing them.</p>
+      <p><b style="color:var(--ink-2)">About the bet.</b> The names and guesses are stand-ins for the real group chat.</p>
+      <p><b style="color:var(--ink-2)">About the model.</b> This is the &ldquo;Lite&rdquo; model. Cal&rsquo;s home run rate per game starts from his previous season&rsquo;s rate, weighted like 150 games of evidence, and updates with every game he plays. His share of games played gets the same treatment, starting from the year before. Each simulation draws a rate and a share from those beliefs, then plays out the games left. Ties split the pot.</p>
+      <p class="meta" id="meta"></p>
+    </div>
+  </footer>
+</div>
+
+<div class="dock">
+  <div class="wrap">
+    <button id="play" aria-label="Play the season from the start">Play</button>
+    <input type="range" id="scrub" min="0" max="162" value="162" aria-label="Team game number">
+    <div class="dock-read" id="dockRead"></div>
+  </div>
+</div>
+</body>
+</html>

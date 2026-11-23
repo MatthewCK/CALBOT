@@ -94,7 +94,7 @@ Named outputs:
 
 **Publishing is atomic:** write the run folder first, then `events.json`, then `latest.json` last. A reader following `latest.json` never sees a half-written run.
 
-**Hosting:** start with a cloud storage bucket (or GitHub Pages for the web side) reachable over HTTPS by every consumer.
+**Hosting:** GitHub Pages, from a `data` branch, deployed by GitHub Actions together with the site and reachable over HTTPS by every consumer. Section 12 has the details. A cloud storage bucket is the later option.
 
 ## 4. How consumers notice updates
 
@@ -115,7 +115,7 @@ Delivery is at least once. The bot skips event ids it has already sent, which co
 
 ### Later: push to wake, pull for data
 
-The model can call a webhook on the bot after publishing ("a new run is ready"). The bot still reads the data from the files; a lost webhook is caught by the regular poll. On Google Cloud this becomes Pub/Sub triggered by a bucket upload.
+The model can call a webhook on the bot after publishing ("a new run is ready"). The bot still reads the data from the files; a lost webhook is caught by the regular poll. On GitHub, the publish workflow calls the webhook as its last step (section 12). On Google Cloud this would become Pub/Sub triggered by a bucket upload.
 
 ## 5. CALBOT Substack
 
@@ -236,12 +236,13 @@ One game slider, docked at the bottom, controls every chart; charts can also be 
 | Need | Choice |
 |---|---|
 | Model, data, simulations | Python |
-| Store game logs and every model run | JSON files first; BigQuery + SQL later |
-| Scheduling | GitHub Actions first; Cloud Scheduler + Cloud Run later |
+| Store game logs and every model run | JSON files on the `data` branch; BigQuery (free tier) loaded by each run, queried with SQL |
+| Scheduling | GitHub Actions (section 12); Cloud Scheduler + Cloud Run Jobs only if it outgrows that |
+| Hosting (site and outputs) | GitHub Pages, one origin |
 | Web front end | HTML/CSS/JS + D3, no heavy framework |
 | Substack charts | Datawrapper via its API |
 | WhatsApp bot | Existing Node app on Railway |
-| Version control | Git, clean commits, CI running data checks |
+| Version control | Git, clean commits, CI running data checks that block a bad publish |
 | Optional | Redo the calibration analysis in R to show range |
 
 ## 10. Roadmap
@@ -250,10 +251,11 @@ One game slider, docked at the bottom, controls every chart; charts can also be 
 2. **Real bet.** Replace the stand-in bettors with the group's real names and guesses (or keep stand-ins if the owner prefers privacy).
 3. **Model package.** Extract the model from `web/prototype/build_data.py` into the Python package in `model/`, with a CLI and the output contract in `contract/`. Add tests and data checks.
 4. **CALBOT Web from outputs.** Turn `web/prototype/` into proper project files in `web/` that read the published outputs.
+   **4b. Deploy.** Publish workflow on GitHub Actions to GitHub Pages, with checks that block a bad publish and a pipeline status page (section 12). BigQuery load step soon after.
 5. **Season of the day.** Add Cal's 2026 stats, the 2027 projection, seeded daily draws, history, and the scheduled job.
 6. **Publisher + Substack.** Datawrapper table for season of the day, then odds and distribution charts. Start the Substack.
 7. **Bot migration.** Point CALBOT WhatsApp (`whatsapp/`) at the outputs and remove its own odds logic.
-8. **Apply.** Once 1–4 are solid and live (roughly two weeks), send the application with a link, a short note on the owner's role, and how AI tools were used.
+8. **Apply.** Once 1–4 and 4b are solid and live (roughly two weeks), send the application with a link, a short note on the owner's role, and how AI tools were used.
 9. **Opening Day 2027.** Go live for the season; a natural reason to follow up with Silver Bulletin.
 
 Open decision: stay focused on Cal and the bet, or build a general home run race and bet builder with Cal as the default view.
@@ -263,3 +265,76 @@ Open decision: stay focused on Cal and the bet, or build a general home run race
 - Prototype data: monthly totals and milestones are real (first HR Mar 31 in game 5; 26 through game 63; 32 through game 77; 38 at the All-Star break; 48 and 49 on Aug 24; 59 and 60 on Sep 24; 60 final). Which game each other home run fell on, and the game dates, are approximate. Bettors and guesses are invented.
 - After every data change, verify the numbers against the source. Accuracy is part of the pitch.
 - Keep an honest log of how AI tools were used, in commits or a notes file.
+
+## 12. Deployment: GitHub and Railway
+
+Decided Nov 2026. Everything runs on free or already-paid services: GitHub Actions and GitHub Pages (free because the repo is public) and the bot's existing Railway service.
+
+### Why not GCP (yet)
+
+For the application, this setup is better, not only cheaper. Reviewers can't see a Cloud Run job, but on a public repo they can see everything:
+- The **Actions tab** shows every scheduled run, its logs and its checks. That shows "model output flows into the site automatically" instead of just claiming it.
+- The **`data` branch** is a commit history of every number ever published, with diffs. That's an audit trail for "checking that published numbers are correct".
+- The **workflow file** is short enough to read in a minute.
+
+GCP would add a monthly bill and setup time, and it would hide the pipeline behind a console nobody outside can open. The posting lists cloud as a plus. BigQuery on its free tier covers that (below), and the README can explain how this maps to Cloud Scheduler + Cloud Run Jobs + Cloud Storage in one paragraph.
+
+### Shape
+
+```
+GitHub Actions (schedule + manual trigger)        GitHub Pages (one site, one origin)
+  1. run calbot-model --out <data folder>           /              <- web/
+  2. run checks; any failure stops here             /data/...      <- the data branch
+  3. commit outputs to the `data` branch     --->        ^                ^
+  4. deploy web/ + data/ to Pages                        |                |
+  5. load the run into BigQuery                    browser reads    bot reads over HTTPS
+  6. push to Datawrapper (publisher)                                      |
+  7. POST {run_id} to the bot's webhook  --->  Railway: CALBOT WhatsApp --+
+```
+
+- **The model isn't a server.** It's a batch job: it runs, writes files and exits. `--out` points at a checkout of the `data` branch instead of `web/data/`.
+- **Site and data share an origin,** so there's no CORS setup, and the default `<meta name="calbot-data">` (`data/`) works as is.
+- **The bot stays on Railway** and reads the Pages URLs. Its Express server gets a small authenticated `/new-run` endpoint. The regular poll (section 4) still catches a lost webhook.
+
+### The `data` branch
+
+A Pages deploy replaces the whole site, so old `runs/<run_id>/` folders would disappear. An orphan `data` branch keeps every published run. Each workflow run checks it out, adds the new run, commits and deploys `web/` plus that folder. Run folders are small JSON files. Old ones can be pruned later if the branch grows.
+
+### Checks block the publish
+
+The workflow runs checks before it deploys, and any failure stops the publish. Bad numbers never go live, and the failed run stays visible in the Actions tab. To start with:
+- The season total and milestones match the game log (`known_facts.json`).
+- Each distribution sums to 1, and percentiles are in order (p5 <= p50 <= p95).
+- Odds across bettors sum to 1.
+- Season home runs never go down, and `through_game` never goes backwards between runs.
+- Every output validates against its schema in `contract/`.
+
+### What GitHub can't do, and what that means
+
+- **Cache headers:** Pages sends `max-age=600` on everything, so `latest.json` can be up to 10 minutes stale. That's fine for a model that updates after each game. The webhook carries the `run_id`, and `runs/<run_id>/` is a brand-new URL, so the bot never reads stale run files.
+- **Atomic publishing:** a Pages deploy switches the whole site at once. The ordering rule in section 3 (`latest.json` last) still holds for the commits to the `data` branch and matters again if publishing moves to a bucket.
+- **Schedule accuracy:** cron is in UTC, runs every 5 minutes at most, and is often 5–20 minutes late. During the season, run every 20–30 minutes in the evening (Pacific time), plus a morning run for season of the day. Say so on the status page.
+- **The 60-day rule:** GitHub turns off scheduled workflows in a public repo after 60 days with no commits to the default branch. Commits to the `data` branch may not count. Re-enable the workflow before Opening Day, or keep a commit to `main` landing every couple of months.
+
+### BigQuery for run history (free tier)
+
+Each run also loads its odds, percentiles and distribution into BigQuery: 10 GB of storage and 1 TB of queries a month are free. A service-account key is stored as an Actions secret. The calibration and backtest pages are built from SQL queries on that table. This moves "BigQuery + SQL later" earlier, because it's the cheapest way to show those skills with no infrastructure to run.
+
+### Pipeline status page
+
+A page on CALBOT Web, built from a small `status.json` the workflow writes: last run time, model version, checks passed, and links to that Actions run and the `data` commit. It turns the plumbing into something a reviewer can click.
+
+### Secrets (GitHub repo secrets, never committed)
+
+- `BOT_WEBHOOK_URL`, `BOT_WEBHOOK_SECRET`
+- `GCP_SA_KEY` (BigQuery)
+- `DATAWRAPPER_TOKEN`
+
+### Setup steps
+
+1. `.github/workflows/publish.yml`: schedule + `workflow_dispatch`; set up Python, install `model/`, run, check, commit to `data`, deploy Pages.
+2. In the GitHub UI, once: Settings → Pages → Source: GitHub Actions.
+3. Add the status page and `status.json`.
+4. Add the BigQuery load step.
+5. Add the bot's `/new-run` endpoint and the webhook step (with roadmap step 7).
+6. Add the Datawrapper step (with roadmap step 6).
