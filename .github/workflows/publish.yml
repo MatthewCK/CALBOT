@@ -12,7 +12,7 @@ jobs:
         with:
           python-version: "3.13"
       - name: Install model
-        run: pip install ./model
+        run: pip install -e ./model
       - name: Run model
         run: calbot-model run --season 2025 --out site-data
       - uses: actions/upload-artifact@v4     # temporary, so you can inspect the output
