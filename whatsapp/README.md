@@ -44,7 +44,7 @@ The MLB Stats API is free and needs no key.
 You'll need Node.js 18 or later and a WhatsApp account.
 
 ```bash
-git clone https://github.com/MatthewCK/CALBOT.git
+git clone https://github.com/matthewkeiper/calbot.git
 cd CALBOT
 npm install
 cp .env.example .env    # then edit .env

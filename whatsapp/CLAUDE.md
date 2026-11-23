@@ -2,7 +2,7 @@
 
 The group-chat bot: polls the MLB API during Mariners games and sends a WhatsApp message when Cal homers, with the bet standings. Node (>= 18), Express, whatsapp-web.js (headless Chrome). `README.md` here is the public, user-facing guide; keep it accurate. See the root `../CLAUDE.md` for the family overview.
 
-This folder was brought in from the standalone `MatthewCK/CALBOT` repo with `git subtree add`, so its history is intact. Commits before the merge refer to paths without the `whatsapp/` prefix.
+This folder was brought in from the standalone `matthewkeiper/calbot` repo with `git subtree add`, so its history is intact. Commits before the merge refer to paths without the `whatsapp/` prefix.
 
 ## Working here
 
