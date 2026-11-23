@@ -1,0 +1,11 @@
+name: Publish
+
+on:
+  workflow_dispatch:        # adds a "Run workflow" button in the Actions tab
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest  # a fresh Linux VM, thrown away after each run
+    steps:
+      - uses: actions/checkout@v5   # copies your repo onto the VM
+      - run: ls -la && python3 --version
